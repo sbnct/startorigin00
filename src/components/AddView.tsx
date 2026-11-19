@@ -435,7 +435,7 @@ export const AddView: React.FC<AddViewProps> = ({
                 value={collectionName}
                 onChange={(e) => setCollectionName(e.target.value)}
                 placeholder="e.g. Kyoto Autumn 2026"
-                className="w-full min-h-[46px] px-4 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+                className="w-full min-h-[46px] px-4 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
               />
             </div>
 
@@ -553,7 +553,7 @@ export const AddView: React.FC<AddViewProps> = ({
                     value={unifiedTitle}
                     onChange={(e) => setUnifiedTitle(e.target.value)}
                     placeholder="e.g. Morning Light @alex"
-                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
                   />
                 </div>
 
@@ -565,7 +565,7 @@ export const AddView: React.FC<AddViewProps> = ({
                     <select
                       value={unifiedPrivacy}
                       onChange={(e) => setUnifiedPrivacy(e.target.value as PhotoPrivacy)}
-                      className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm"
+                      className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
                     >
                       <option value="public">Public (Feed &amp; Profile)</option>
                       <option value="private">Private (Gallery only)</option>
@@ -579,7 +579,7 @@ export const AddView: React.FC<AddViewProps> = ({
                     <select
                       value={unifiedCollectionId}
                       onChange={(e) => setUnifiedCollectionId(e.target.value)}
-                      className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm"
+                      className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
                     >
                       <option value="">Unsorted (No Collection)</option>
                       {collections.map((c) => (
@@ -600,7 +600,7 @@ export const AddView: React.FC<AddViewProps> = ({
                     value={unifiedTags}
                     onChange={(e) => setUnifiedTags(e.target.value)}
                     placeholder="architecture, monochrome, japan"
-                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
                   />
                 </div>
               </div>
@@ -644,7 +644,7 @@ export const AddView: React.FC<AddViewProps> = ({
                               updatePendingItem(item.id, { title: e.target.value })
                             }
                             placeholder="Photo name"
-                            className="w-full min-h-[40px] px-3 py-2 rounded-xl bg-white border border-black/[0.08] focus:border-[#0A0A0A] outline-none text-xs"
+                            className="w-full min-h-[40px] px-3 py-2 rounded-xl bg-white border border-black/[0.08] focus:border-[#0A0A0A] outline-none text-base md:text-xs"
                           />
                         </div>
                       </div>
@@ -657,7 +657,7 @@ export const AddView: React.FC<AddViewProps> = ({
                               privacy: e.target.value as PhotoPrivacy,
                             })
                           }
-                          className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-black/[0.08] text-xs"
+                          className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-black/[0.08] text-base md:text-xs"
                         >
                           <option value="public">Public</option>
                           <option value="private">Private</option>
@@ -668,7 +668,7 @@ export const AddView: React.FC<AddViewProps> = ({
                           onChange={(e) =>
                             updatePendingItem(item.id, { collectionId: e.target.value })
                           }
-                          className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-black/[0.08] text-xs"
+                          className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-black/[0.08] text-base md:text-xs"
                         >
                           <option value="">Unsorted</option>
                           {collections.map((c) => (
@@ -685,7 +685,7 @@ export const AddView: React.FC<AddViewProps> = ({
                             updatePendingItem(item.id, { tagsText: e.target.value })
                           }
                           placeholder="Tags (comma-separated)"
-                          className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-black/[0.08] text-xs"
+                          className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-black/[0.08] text-base md:text-xs"
                         />
                       </div>
                     </div>

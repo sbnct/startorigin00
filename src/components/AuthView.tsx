@@ -318,7 +318,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
               onChange={(e) => setIdentifier(e.target.value)}
               placeholder="alex or alex@example.com"
               autoComplete="username"
-              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
             />
           </div>
 
@@ -332,7 +332,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter your password"
               autoComplete="current-password"
-              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
             />
           </div>
 
@@ -356,7 +356,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
               onChange={(e) => setName(e.target.value)}
               placeholder="Alex Mercer"
               autoComplete="name"
-              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
             />
           </div>
 
@@ -370,7 +370,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
               onChange={(e) => setUsername(e.target.value)}
               placeholder="alexmercer"
               autoComplete="username"
-              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
             />
             <p className="text-[11px] text-[#737373] mt-1">
               Case-insensitive (e.g. Alex and alex refer to the same handle).
@@ -387,7 +387,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
               onChange={(e) => setEmail(e.target.value)}
               placeholder="alex@example.com"
               autoComplete="email"
-              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
             />
           </div>
 
@@ -401,7 +401,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Minimum 6 characters"
               autoComplete="new-password"
-              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
             />
           </div>
 

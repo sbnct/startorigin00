@@ -207,7 +207,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Enter admin password"
                 autoFocus
-                className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+                className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
               />
             </div>
 
@@ -286,7 +286,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Filter posts by title or @username..."
-            className="w-full min-h-[44px] pl-11 pr-10 py-2.5 rounded-2xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+            className="w-full min-h-[44px] pl-11 pr-10 py-2.5 rounded-2xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
           />
           {query && (
             <button

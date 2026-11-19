@@ -347,7 +347,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             value={tagQuery}
             onChange={(e) => setTagQuery(e.target.value)}
             placeholder="Filter by tag or name..."
-            className="w-full min-h-[44px] pl-10 pr-10 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+            className="w-full min-h-[44px] pl-10 pr-10 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
           />
           {tagQuery && (
             <button
@@ -372,7 +372,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
               aria-label="Filter by date"
-              className="w-full min-h-[44px] pl-10 pr-3 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-xs transition-colors"
+              className="w-full min-h-[44px] pl-10 pr-3 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-xs transition-colors"
             />
           </div>
           {dateFilter && (
@@ -513,7 +513,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
               autoFocus
-              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm"
+              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
             />
             <div className="flex items-center justify-end gap-2">
               <button
@@ -552,7 +552,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             <select
               value={moveCollectionId}
               onChange={(e) => setMoveCollectionId(e.target.value)}
-              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm"
+              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
             >
               <option value="">Unsorted (No Collection)</option>
               {collections.map((c) => (

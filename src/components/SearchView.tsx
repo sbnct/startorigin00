@@ -93,7 +93,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search users or photos by name..."
-          className="w-full min-h-[48px] pl-11 pr-11 py-3 rounded-2xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-sm transition-colors"
+          className="w-full min-h-[48px] pl-11 pr-11 py-3 rounded-2xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
         />
         {query && (
           <button
