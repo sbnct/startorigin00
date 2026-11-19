@@ -4,6 +4,8 @@ import {
   Bookmark,
   Camera,
   Check,
+  Folder,
+  Link2,
   LogOut,
   Pencil,
   UserPlus,
@@ -12,13 +14,16 @@ import {
 import { supabase } from '../lib/supabase';
 import {
   ActivityLog,
+  Collection,
   Photo,
   Profile,
   SavedPhotoItem,
 } from '../types';
 import {
+  copyTextToClipboard,
   formatDate,
   formatRelativeTime,
+  getCollectionShareUrl,
   getInitials,
   sanitizeFilename,
 } from '../lib/utils';
@@ -36,9 +41,11 @@ interface ProfileViewProps {
   onBack?: () => void;
   onAuthSuccess: () => void;
   onOpenPost: (photoId: string) => void;
+  onOpenCollection: (collectionId: string) => void;
   onProfileUpdated: () => void;
   onRequireAuth: () => void;
   onSignOut?: () => void;
+  onShowToast?: (msg: string) => void;
   refreshKey: number;
 }
 
@@ -49,9 +56,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onBack,
   onAuthSuccess,
   onOpenPost,
+  onOpenCollection,
   onProfileUpdated,
   onRequireAuth,
   onSignOut,
+  onShowToast,
   refreshKey,
 }) => {
   const effectiveUserId = targetUserId || currentUserId;
@@ -61,14 +70,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [publicPhotos, setPublicPhotos] = useState<Photo[]>([]);
+  const [publicCollections, setPublicCollections] = useState<Collection[]>([]);
   const [savedPhotos, setSavedPhotos] = useState<SavedPhotoItem[]>([]);
+  const [copiedColId, setCopiedColId] = useState<string | null>(null);
   const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [likeBusyIds, setLikeBusyIds] = useState<Set<string>>(new Set());
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [subscribersCount, setSubscribersCount] = useState(0);
   const [isSubscribed, setIsSubscribed] = useState(false);
-  const [activeTab, setActiveTab] = useState<'photos' | 'saved' | 'activity'>('photos');
+  const [activeTab, setActiveTab] = useState<
+    'photos' | 'collections' | 'saved' | 'activity'
+  >('photos');
   const [loading, setLoading] = useState(true);
   const [subBusy, setSubBusy] = useState(false);
 
@@ -89,6 +102,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       const [
         { data: profData },
         { data: photosData },
+        { data: collectionsData },
         { count: subCount },
         { data: actData },
         { data: savedData },
@@ -100,6 +114,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           .eq('user_id', effectiveUserId)
           .eq('privacy', 'public')
           .order('created_at', { ascending: false }),
+        supabase
+          .from('collections')
+          .select('*')
+          .eq('user_id', effectiveUserId)
+          .order('updated_at', { ascending: false }),
         supabase
           .from('subscriptions')
           .select('*', { count: 'exact', head: true })
@@ -127,6 +146,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
       setProfile((profData as Profile) || null);
       setPublicPhotos((photosData as Photo[]) || []);
+      setPublicCollections(
+        ((collectionsData as Collection[]) || []).filter(
+          (c) => (c.privacy || 'public') === 'public'
+        )
+      );
       setSubscribersCount(subCount || 0);
       setActivities((actData as ActivityLog[]) || []);
 
@@ -545,6 +569,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </button>
         <button
           type="button"
+          onClick={() => setActiveTab('collections')}
+          className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
+            activeTab === 'collections'
+              ? 'bg-white text-[#0A0A0A] shadow-xs'
+              : 'text-[#737373] hover:text-[#0A0A0A]'
+          }`}
+        >
+          Collections
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab('saved')}
           className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
             activeTab === 'saved'
@@ -614,6 +649,96 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 2: Public Collections Grid */}
+      {activeTab === 'collections' && (
+        <div>
+          {publicCollections.length === 0 ? (
+            <div className="py-16 text-center rounded-3xl border border-black/[0.06] bg-[#FAFAFA]">
+              <Folder className="w-6 h-6 mx-auto text-[#737373] mb-2" strokeWidth={1.5} />
+              <p className="text-xs text-[#737373]">No public collections yet.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {publicCollections.map((col) => {
+                const colPhotos = publicPhotos.filter((p) => p.collection_id === col.id);
+                const previews = colPhotos.slice(0, 4);
+                const isCopied = copiedColId === col.id;
+                return (
+                  <div
+                    key={col.id}
+                    className="group p-3.5 rounded-3xl border border-black/[0.08] bg-white hover:bg-[#F5F5F7] transition-colors flex flex-col"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onOpenCollection(col.id)}
+                      className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
+                    >
+                      <div className="grid grid-cols-2 gap-1.5 aspect-[4/3] rounded-2xl overflow-hidden bg-[#F5F5F7] mb-3">
+                        {previews.length === 0 ? (
+                          <div className="col-span-2 flex flex-col items-center justify-center text-[#737373]">
+                            <Folder className="w-6 h-6 opacity-40" strokeWidth={1.5} />
+                          </div>
+                        ) : (
+                          previews.map((p) => (
+                            <ResilientImage
+                              key={p.id}
+                              src={p.image_url}
+                              alt={p.title}
+                              containerClassName="w-full h-full"
+                              className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+                            />
+                          ))
+                        )}
+                      </div>
+                    </button>
+
+                    <div className="flex items-center justify-between gap-2 px-1">
+                      <button
+                        type="button"
+                        onClick={() => onOpenCollection(col.id)}
+                        className="text-left min-w-0 flex-1"
+                      >
+                        <h3 className="text-sm font-semibold text-[#0A0A0A] truncate">
+                          {col.name}
+                        </h3>
+                        <p className="text-xs text-[#737373] tabular-nums">
+                          {colPhotos.length} {colPhotos.length === 1 ? 'photo' : 'photos'}
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const ok = await copyTextToClipboard(
+                            getCollectionShareUrl(col.id)
+                          );
+                          if (ok) {
+                            setCopiedColId(col.id);
+                            onShowToast?.('Collection link copied');
+                            setTimeout(() => {
+                              setCopiedColId((prev) => (prev === col.id ? null : prev));
+                            }, 2000);
+                          }
+                        }}
+                        aria-label={`Copy link to ${col.name}`}
+                        className="min-h-[36px] min-w-[36px] px-2.5 rounded-xl border border-black/[0.08] bg-white hover:bg-black/[0.05] text-[#0A0A0A] inline-flex items-center justify-center gap-1 text-xs font-medium shrink-0 transition-colors"
+                      >
+                        {isCopied ? (
+                          <Check className="w-3.5 h-3.5" strokeWidth={2} />
+                        ) : (
+                          <Link2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

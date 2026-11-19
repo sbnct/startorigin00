@@ -1,8 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Compass, RefreshCw, Users } from 'lucide-react';
+import { Check, Compass, Link2, RefreshCw, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { CinemaPhoto, PhotoWithAuthor } from '../types';
-import { formatDate, getInitials } from '../lib/utils';
+import {
+  copyTextToClipboard,
+  formatDate,
+  getInitials,
+  getPhotoShareUrl,
+} from '../lib/utils';
 import { MentionText } from './MentionText';
 import { ResilientImage } from './ResilientImage';
 import { VerifiedBadge } from './VerifiedBadge';
@@ -16,6 +21,7 @@ interface FeedViewProps {
   onOpenProfile: (userId: string) => void;
   onOpenProfileByUsername: (username: string) => void;
   onRequireAuth: () => void;
+  onShowToast?: (msg: string) => void;
   refreshKey: number;
 }
 
@@ -26,6 +32,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
   onOpenProfile,
   onOpenProfileByUsername,
   onRequireAuth,
+  onShowToast,
   refreshKey,
 }) => {
   const [feedFilter, setFeedFilter] = useState<'all' | 'following'>('all');
@@ -33,6 +40,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
   const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [likeBusyIds, setLikeBusyIds] = useState<Set<string>>(new Set());
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -338,12 +346,37 @@ export const FeedView: React.FC<FeedViewProps> = ({
                     />
                   </div>
 
-                  <LikeButton
-                    liked={likedIds.has(photo.id)}
-                    count={likeCounts[photo.id] || 0}
-                    busy={likeBusyIds.has(photo.id)}
-                    onToggle={() => handleToggleLike(photo)}
-                  />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        const ok = await copyTextToClipboard(getPhotoShareUrl(photo.id));
+                        if (ok) {
+                          setCopiedId(photo.id);
+                          onShowToast?.('Photo link copied');
+                          setTimeout(() => {
+                            setCopiedId((prev) => (prev === photo.id ? null : prev));
+                          }, 2000);
+                        }
+                      }}
+                      aria-label={`Copy link for ${photo.title}`}
+                      className="min-h-[38px] min-w-[38px] px-2.5 py-1.5 rounded-xl border border-black/[0.08] bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
+                    >
+                      {copiedId === photo.id ? (
+                        <Check className="w-4 h-4" strokeWidth={2} />
+                      ) : (
+                        <Link2 className="w-4 h-4" strokeWidth={1.75} />
+                      )}
+                    </button>
+
+                    <LikeButton
+                      liked={likedIds.has(photo.id)}
+                      count={likeCounts[photo.id] || 0}
+                      busy={likeBusyIds.has(photo.id)}
+                      onToggle={() => handleToggleLike(photo)}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between gap-3 text-xs text-[#737373]">

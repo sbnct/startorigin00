@@ -2,8 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   Calendar,
+  Check,
   Folder,
   FolderInput,
+  Globe,
+  Link2,
+  Lock,
   MoreHorizontal,
   Pencil,
   Search,
@@ -11,8 +15,21 @@ import {
   X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { CinemaPhoto, Collection, Photo } from '../types';
-import { formatDate } from '../lib/utils';
+import {
+  CinemaPhoto,
+  Collection,
+  CollectionPrivacy,
+  Photo,
+  PhotoPrivacy,
+  VisibilityLevel,
+} from '../types';
+import {
+  copyTextToClipboard,
+  formatDate,
+  getCollectionShareUrl,
+  getPhotoShareUrl,
+  getVisibilityLabel,
+} from '../lib/utils';
 import { AuthView } from './AuthView';
 import { ResilientImage } from './ResilientImage';
 
@@ -21,6 +38,7 @@ interface GalleryViewProps {
   onAuthSuccess: () => void;
   onOpenCinema: (photo: CinemaPhoto) => void;
   onDataChanged: () => void;
+  onShowToast?: (msg: string) => void;
   refreshKey: number;
 }
 
@@ -29,6 +47,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   onAuthSuccess,
   onOpenCinema,
   onDataChanged,
+  onShowToast,
   refreshKey,
 }) => {
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -40,12 +59,23 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   const [tagQuery, setTagQuery] = useState('');
   const [dateFilter, setDateFilter] = useState('');
 
-  // Three-dot menu & action modals
+  // Three-dot menus & action modals
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [colMenuOpenId, setColMenuOpenId] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<Photo | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [moveTarget, setMoveTarget] = useState<Photo | null>(null);
   const [moveCollectionId, setMoveCollectionId] = useState<string>('');
+  const [photoPrivacyTarget, setPhotoPrivacyTarget] = useState<Photo | null>(null);
+  const [photoPrivacyValue, setPhotoPrivacyValue] = useState<PhotoPrivacy>('public');
+
+  // Collection action modals
+  const [colRenameTarget, setColRenameTarget] = useState<Collection | null>(null);
+  const [colRenameValue, setColRenameValue] = useState('');
+  const [colPrivacyTarget, setColPrivacyTarget] = useState<Collection | null>(null);
+  const [colPrivacyValue, setColPrivacyValue] = useState<CollectionPrivacy>('public');
+
+  const [modalError, setModalError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
 
   const loadGallery = useCallback(async () => {
@@ -77,12 +107,15 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   }, [loadGallery, refreshKey]);
 
   useEffect(() => {
-    const closeMenu = () => setMenuOpenId(null);
-    if (menuOpenId) {
+    const closeMenu = () => {
+      setMenuOpenId(null);
+      setColMenuOpenId(null);
+    };
+    if (menuOpenId || colMenuOpenId) {
       window.addEventListener('click', closeMenu);
       return () => window.removeEventListener('click', closeMenu);
     }
-  }, [menuOpenId]);
+  }, [menuOpenId, colMenuOpenId]);
 
   const filteredPhotos = useMemo(() => {
     const q = tagQuery.trim().toLowerCase();
@@ -206,6 +239,110 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
     }
   };
 
+  const handlePhotoPrivacySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!photoPrivacyTarget) return;
+    setActionBusy(true);
+    setModalError(null);
+    try {
+      const { error } = await supabase
+        .from('photos')
+        .update({ privacy: photoPrivacyValue })
+        .eq('id', photoPrivacyTarget.id)
+        .eq('user_id', currentUserId);
+      if (error) {
+        setModalError(error.message);
+        return;
+      }
+      setPhotos((prev) =>
+        prev.map((p) =>
+          p.id === photoPrivacyTarget.id ? { ...p, privacy: photoPrivacyValue } : p
+        )
+      );
+      setPhotoPrivacyTarget(null);
+      onDataChanged();
+      onShowToast?.(`Photo set to ${getVisibilityLabel(photoPrivacyValue)}`);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleColRenameSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!colRenameTarget || !colRenameValue.trim()) return;
+    setActionBusy(true);
+    setModalError(null);
+    try {
+      const nextName = colRenameValue.trim();
+      const { error } = await supabase
+        .from('collections')
+        .update({ name: nextName })
+        .eq('id', colRenameTarget.id)
+        .eq('user_id', currentUserId);
+      if (error) {
+        setModalError(error.message);
+        return;
+      }
+      setCollections((prev) =>
+        prev.map((c) => (c.id === colRenameTarget.id ? { ...c, name: nextName } : c))
+      );
+      setColRenameTarget(null);
+      onDataChanged();
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleColPrivacySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!colPrivacyTarget) return;
+    setActionBusy(true);
+    setModalError(null);
+    try {
+      const { error } = await supabase
+        .from('collections')
+        .update({ privacy: colPrivacyValue })
+        .eq('id', colPrivacyTarget.id)
+        .eq('user_id', currentUserId);
+      if (error) {
+        setModalError(error.message);
+        return;
+      }
+      setCollections((prev) =>
+        prev.map((c) =>
+          c.id === colPrivacyTarget.id ? { ...c, privacy: colPrivacyValue } : c
+        )
+      );
+      setColPrivacyTarget(null);
+      onDataChanged();
+      onShowToast?.(`Collection set to ${getVisibilityLabel(colPrivacyValue)}`);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleCopyPhotoLink = async (photo: Photo) => {
+    const ok = await copyTextToClipboard(getPhotoShareUrl(photo.id));
+    setMenuOpenId(null);
+    if (ok) {
+      onShowToast?.('Photo link copied');
+    }
+  };
+
+  const handleCopyCollectionLink = async (col: Collection) => {
+    const ok = await copyTextToClipboard(getCollectionShareUrl(col.id));
+    setColMenuOpenId(null);
+    if (ok) {
+      onShowToast?.('Collection link copied');
+    }
+  };
+
+  const renderPrivacyIcon = (privacy?: VisibilityLevel) => {
+    if (privacy === 'private') return <Lock className="w-3 h-3" strokeWidth={1.75} />;
+    if (privacy === 'unlisted') return <Link2 className="w-3 h-3" strokeWidth={1.75} />;
+    return <Globe className="w-3 h-3" strokeWidth={1.75} />;
+  };
+
   const renderPhotoCard = (photo: Photo) => {
     const isMenuOpen = menuOpenId === photo.id;
     return (
@@ -218,7 +355,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               id: photo.id,
               title: photo.title,
               image_url: photo.image_url,
-              subtitle: `${photo.privacy === 'private' ? 'Private' : 'Public'} · ${formatDate(
+              subtitle: `${getVisibilityLabel(photo.privacy)} · ${formatDate(
                 photo.photo_date || photo.created_at
               )}`,
             })
@@ -238,6 +375,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
+            setColMenuOpenId(null);
             setMenuOpenId(isMenuOpen ? null : photo.id);
           }}
           aria-label={`Photo options for ${photo.title}`}
@@ -250,8 +388,31 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
         {isMenuOpen && (
           <div
             onClick={(e) => e.stopPropagation()}
-            className="absolute top-12 right-2.5 z-20 w-48 bg-white border border-black/[0.1] rounded-2xl shadow-xl p-1.5 space-y-0.5"
+            className="absolute top-12 right-2.5 z-20 w-52 bg-white border border-black/[0.1] rounded-2xl shadow-xl p-1.5 space-y-0.5"
           >
+            <button
+              type="button"
+              onClick={() => handleCopyPhotoLink(photo)}
+              className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-[#0A0A0A] hover:bg-[#F5F5F7] flex items-center gap-2.5 text-left"
+            >
+              <Link2 className="w-3.5 h-3.5" />
+              <span>Copy Link</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpenId(null);
+                setModalError(null);
+                setPhotoPrivacyTarget(photo);
+                setPhotoPrivacyValue(photo.privacy);
+              }}
+              className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-[#0A0A0A] hover:bg-[#F5F5F7] flex items-center gap-2.5 text-left"
+            >
+              {renderPrivacyIcon(photo.privacy)}
+              <span>Change Privacy</span>
+            </button>
+
             <button
               type="button"
               onClick={() => {
@@ -294,7 +455,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
         <div className="mt-2 px-0.5">
           <p className="text-xs font-medium text-[#0A0A0A] truncate">{photo.title}</p>
           <p className="text-[11px] text-[#737373] truncate tabular-nums">
-            {photo.privacy === 'private' ? 'Private' : 'Public'} ·{' '}
+            {getVisibilityLabel(photo.privacy)} ·{' '}
             {formatDate(photo.photo_date || photo.created_at)}
           </p>
         </div>
@@ -308,19 +469,60 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
       <div className="mb-6">
         {selectedCollectionId && activeCollection ? (
           <div className="space-y-4">
-            <button
-              type="button"
-              onClick={() => setSelectedCollectionId(null)}
-              className="min-h-[44px] px-4 py-2 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-2 transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" strokeWidth={1.75} />
-              <span>Go Back</span>
-            </button>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedCollectionId(null)}
+                className="min-h-[44px] px-4 py-2 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-2 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" strokeWidth={1.75} />
+                <span>Go Back</span>
+              </button>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleCopyCollectionLink(activeCollection)}
+                  className="min-h-[40px] px-3.5 py-2 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-1.5 transition-colors"
+                >
+                  <Link2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  <span>Copy Link</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalError(null);
+                    setColPrivacyTarget(activeCollection);
+                    setColPrivacyValue(activeCollection.privacy || 'public');
+                  }}
+                  className="min-h-[40px] px-3.5 py-2 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-1.5 transition-colors"
+                >
+                  {renderPrivacyIcon(activeCollection.privacy || 'public')}
+                  <span>{getVisibilityLabel(activeCollection.privacy || 'public')}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalError(null);
+                    setColRenameTarget(activeCollection);
+                    setColRenameValue(activeCollection.name);
+                  }}
+                  className="min-h-[40px] px-3.5 py-2 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-1.5 transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
+                  <span>Rename</span>
+                </button>
+              </div>
+            </div>
+
             <div>
               <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-[#0A0A0A]">
                 {activeCollection.name}
               </h1>
               <p className="text-xs text-[#737373] mt-1 tabular-nums">
+                {getVisibilityLabel(activeCollection.privacy || 'public')} ·{' '}
                 {collectionPhotos.length}{' '}
                 {collectionPhotos.length === 1 ? 'photo' : 'photos'}
               </p>
@@ -454,40 +656,114 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                 {sortedCollections.map(({ col, colPhotos }) => {
                   const previews = colPhotos.slice(0, 4);
+                  const isColMenuOpen = colMenuOpenId === col.id;
+                  const colPrivacy = col.privacy || 'public';
                   return (
-                    <button
+                    <div
                       key={col.id}
-                      type="button"
-                      onClick={() => setSelectedCollectionId(col.id)}
-                      className="group text-left p-3.5 rounded-3xl border border-black/[0.08] bg-white hover:bg-[#F5F5F7] transition-colors"
+                      className="group relative p-3.5 rounded-3xl border border-black/[0.08] bg-white hover:bg-[#F5F5F7] transition-colors"
                     >
-                      <div className="grid grid-cols-2 gap-1.5 aspect-[4/3] rounded-2xl overflow-hidden bg-[#F5F5F7] mb-3">
-                        {previews.length === 0 ? (
-                          <div className="col-span-2 flex flex-col items-center justify-center text-[#737373]">
-                            <Folder className="w-6 h-6 opacity-40" strokeWidth={1.5} />
-                          </div>
-                        ) : (
-                          previews.map((p) => (
-                            <ResilientImage
-                              key={p.id}
-                              src={p.image_url}
-                              alt={p.title}
-                              containerClassName="w-full h-full"
-                              className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
-                            />
-                          ))
-                        )}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCollectionId(col.id)}
+                        className="block w-full text-left"
+                      >
+                        <div className="grid grid-cols-2 gap-1.5 aspect-[4/3] rounded-2xl overflow-hidden bg-[#F5F5F7] mb-3">
+                          {previews.length === 0 ? (
+                            <div className="col-span-2 flex flex-col items-center justify-center text-[#737373]">
+                              <Folder className="w-6 h-6 opacity-40" strokeWidth={1.5} />
+                            </div>
+                          ) : (
+                            previews.map((p) => (
+                              <ResilientImage
+                                key={p.id}
+                                src={p.image_url}
+                                alt={p.title}
+                                containerClassName="w-full h-full"
+                                className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+                              />
+                            ))
+                          )}
+                        </div>
+                      </button>
 
-                      <div className="flex items-baseline justify-between gap-2 px-1">
-                        <h3 className="text-sm font-semibold text-[#0A0A0A] truncate">
-                          {col.name}
-                        </h3>
+                      {/* Three-dot collection button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuOpenId(null);
+                          setColMenuOpenId(isColMenuOpen ? null : col.id);
+                        }}
+                        aria-label={`Collection options for ${col.name}`}
+                        className="absolute top-5 right-5 w-9 h-9 rounded-full bg-white/90 backdrop-blur-md border border-black/[0.08] text-[#0A0A0A] flex items-center justify-center shadow-xs hover:bg-white transition-colors z-10"
+                      >
+                        <MoreHorizontal className="w-4 h-4" />
+                      </button>
+
+                      {isColMenuOpen && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute top-15 right-5 z-20 w-52 bg-white border border-black/[0.1] rounded-2xl shadow-xl p-1.5 space-y-0.5"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleCopyCollectionLink(col)}
+                            className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-[#0A0A0A] hover:bg-[#F5F5F7] flex items-center gap-2.5 text-left"
+                          >
+                            <Link2 className="w-3.5 h-3.5" />
+                            <span>Copy Link</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setColMenuOpenId(null);
+                              setModalError(null);
+                              setColPrivacyTarget(col);
+                              setColPrivacyValue(colPrivacy);
+                            }}
+                            className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-[#0A0A0A] hover:bg-[#F5F5F7] flex items-center gap-2.5 text-left"
+                          >
+                            {renderPrivacyIcon(colPrivacy)}
+                            <span>Change Privacy</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setColMenuOpenId(null);
+                              setModalError(null);
+                              setColRenameTarget(col);
+                              setColRenameValue(col.name);
+                            }}
+                            className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-[#0A0A0A] hover:bg-[#F5F5F7] flex items-center gap-2.5 text-left"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            <span>Rename Collection</span>
+                          </button>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCollectionId(col.id)}
+                        className="w-full flex items-baseline justify-between gap-2 px-1 text-left"
+                      >
+                        <div className="min-w-0">
+                          <h3 className="text-sm font-semibold text-[#0A0A0A] truncate">
+                            {col.name}
+                          </h3>
+                          <p className="text-[11px] text-[#737373] inline-flex items-center gap-1 mt-0.5">
+                            {renderPrivacyIcon(colPrivacy)}
+                            <span>{getVisibilityLabel(colPrivacy)}</span>
+                          </p>
+                        </div>
                         <span className="text-xs text-[#737373] tabular-nums shrink-0">
                           {colPhotos.length} {colPhotos.length === 1 ? 'photo' : 'photos'}
                         </span>
-                      </div>
-                    </button>
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -575,6 +851,208 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                 className="min-h-[40px] px-4 py-2 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium disabled:opacity-40"
               >
                 Move
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Photo Privacy Modal */}
+      {photoPrivacyTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <form
+            onSubmit={handlePhotoPrivacySubmit}
+            className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl"
+          >
+            <h2 className="text-base font-semibold text-[#0A0A0A]">
+              Privacy for &ldquo;{photoPrivacyTarget.title}&rdquo;
+            </h2>
+            {modalError && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
+                {modalError}
+              </div>
+            )}
+            <div className="space-y-2">
+              {(
+                [
+                  {
+                    value: 'public',
+                    label: 'Public',
+                    desc: 'Shown in Feed, Search, and Profile',
+                  },
+                  {
+                    value: 'unlisted',
+                    label: 'By Link',
+                    desc: 'Hidden from feeds; viewable only with copied link',
+                  },
+                  {
+                    value: 'private',
+                    label: 'Private',
+                    desc: 'Only visible to you in Gallery',
+                  },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setPhotoPrivacyValue(opt.value)}
+                  className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between gap-3 transition-colors ${
+                    photoPrivacyValue === opt.value
+                      ? 'border-[#0A0A0A] bg-[#F5F5F7]'
+                      : 'border-black/[0.08] hover:bg-[#FAFAFA]'
+                  }`}
+                >
+                  <div>
+                    <p className="text-xs font-semibold text-[#0A0A0A]">{opt.label}</p>
+                    <p className="text-[11px] text-[#737373] mt-0.5">{opt.desc}</p>
+                  </div>
+                  {photoPrivacyValue === opt.value && (
+                    <Check className="w-4 h-4 text-[#0A0A0A] shrink-0" />
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setPhotoPrivacyTarget(null)}
+                className="min-h-[40px] px-4 py-2 rounded-xl text-xs font-medium text-[#525252] hover:bg-[#F5F5F7]"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={actionBusy}
+                className="min-h-[40px] px-4 py-2 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium disabled:opacity-40"
+              >
+                {actionBusy ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Collection Rename Modal */}
+      {colRenameTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <form
+            onSubmit={handleColRenameSubmit}
+            className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl"
+          >
+            <h2 className="text-base font-semibold text-[#0A0A0A]">Rename Collection</h2>
+            {modalError && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
+                {modalError}
+              </div>
+            )}
+            <input
+              type="text"
+              value={colRenameValue}
+              onChange={(e) => setColRenameValue(e.target.value)}
+              autoFocus
+              className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setColRenameTarget(null)}
+                className="min-h-[40px] px-4 py-2 rounded-xl text-xs font-medium text-[#525252] hover:bg-[#F5F5F7]"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={actionBusy || !colRenameValue.trim()}
+                className="min-h-[40px] px-4 py-2 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium disabled:opacity-40"
+              >
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Collection Privacy Modal */}
+      {colPrivacyTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <form
+            onSubmit={handleColPrivacySubmit}
+            className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl"
+          >
+            <h2 className="text-base font-semibold text-[#0A0A0A]">
+              Privacy for &ldquo;{colPrivacyTarget.name}&rdquo;
+            </h2>
+            {modalError && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
+                {modalError}
+              </div>
+            )}
+            <div className="space-y-2">
+              {(
+                [
+                  {
+                    value: 'public',
+                    label: 'Public',
+                    desc: 'Visible on Profile & linked from public photo pages',
+                  },
+                  {
+                    value: 'unlisted',
+                    label: 'By Link',
+                    desc: 'Hidden from Profile & photo pages; viewable only via link',
+                  },
+                  {
+                    value: 'private',
+                    label: 'Private',
+                    desc: 'Only visible to you in Gallery',
+                  },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setColPrivacyValue(opt.value)}
+                  className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between gap-3 transition-colors ${
+                    colPrivacyValue === opt.value
+                      ? 'border-[#0A0A0A] bg-[#F5F5F7]'
+                      : 'border-black/[0.08] hover:bg-[#FAFAFA]'
+                  }`}
+                >
+                  <div>
+                    <p className="text-xs font-semibold text-[#0A0A0A]">{opt.label}</p>
+                    <p className="text-[11px] text-[#737373] mt-0.5">{opt.desc}</p>
+                  </div>
+                  {colPrivacyValue === opt.value && (
+                    <Check className="w-4 h-4 text-[#0A0A0A] shrink-0" />
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setColPrivacyTarget(null)}
+                className="min-h-[40px] px-4 py-2 rounded-xl text-xs font-medium text-[#525252] hover:bg-[#F5F5F7]"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={actionBusy}
+                className="min-h-[40px] px-4 py-2 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium disabled:opacity-40"
+              >
+                {actionBusy ? 'Saving...' : 'Save'}
               </button>
             </div>
           </form>

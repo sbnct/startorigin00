@@ -1,16 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
+  Check,
   CheckCircle2,
   FolderPlus,
   ImagePlus,
   Layers,
+  Link2,
   Trash2,
   Upload,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { Collection, PhotoPrivacy } from '../types';
-import { sanitizeFilename } from '../lib/utils';
+import { Collection, CollectionPrivacy, PhotoPrivacy } from '../types';
+import {
+  copyTextToClipboard,
+  getCollectionShareUrl,
+  sanitizeFilename,
+} from '../lib/utils';
 import { AuthView } from './AuthView';
 
 interface AddViewProps {
@@ -50,6 +56,12 @@ export const AddView: React.FC<AddViewProps> = ({
 
   // Add Collection state
   const [collectionName, setCollectionName] = useState('');
+  const [collectionPrivacy, setCollectionPrivacy] = useState<CollectionPrivacy>('public');
+  const [createdCollection, setCreatedCollection] = useState<{
+    id: string;
+    privacy: CollectionPrivacy;
+  } | null>(null);
+  const [copiedNewColLink, setCopiedNewColLink] = useState(false);
 
   // Submission & confirmation state
   const [submitting, setSubmitting] = useState(false);
@@ -267,6 +279,8 @@ export const AddView: React.FC<AddViewProps> = ({
     e.preventDefault();
     setError(null);
     setConfirmationMessage(null);
+    setCreatedCollection(null);
+    setCopiedNewColLink(false);
 
     const trimmed = collectionName.trim();
     if (!trimmed) {
@@ -276,30 +290,56 @@ export const AddView: React.FC<AddViewProps> = ({
 
     setSubmitting(true);
     try {
-      const { data: created, error: createErr } = await supabase
+      let { data: created, error: createErr } = await supabase
         .from('collections')
         .insert({
           user_id: currentUserId,
           name: trimmed,
+          privacy: collectionPrivacy,
         })
         .select()
         .single();
+
+      if (
+        createErr &&
+        createErr.message?.toLowerCase().includes('privacy') &&
+        collectionPrivacy === 'public'
+      ) {
+        const retry = await supabase
+          .from('collections')
+          .insert({
+            user_id: currentUserId,
+            name: trimmed,
+          })
+          .select()
+          .single();
+        created = retry.data;
+        createErr = retry.error;
+      }
 
       if (createErr) {
         throw new Error(createErr.message);
       }
 
-      await supabase.from('activity_logs').insert({
-        user_id: currentUserId,
-        actor_id: currentUserId,
-        action_type: 'collection',
-        target_id: created?.id || null,
-        description: `Created collection "${trimmed}"`,
-        is_public: true,
-      });
+      try {
+        await supabase.from('activity_logs').insert({
+          user_id: currentUserId,
+          actor_id: currentUserId,
+          action_type: 'collection',
+          target_id: created?.id || null,
+          description: `Created collection "${trimmed}"`,
+          is_public: collectionPrivacy === 'public',
+        });
+      } catch {
+        // Non-fatal
+      }
 
+      if (created?.id) {
+        setCreatedCollection({ id: created.id, privacy: collectionPrivacy });
+      }
       setConfirmationMessage(`Collection "${trimmed}" was created successfully.`);
       setCollectionName('');
+      setCollectionPrivacy('public');
       onDataChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create collection.');
@@ -395,9 +435,39 @@ export const AddView: React.FC<AddViewProps> = ({
               >
                 Open Gallery
               </button>
+              {createdCollection && createdCollection.privacy !== 'private' && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const ok = await copyTextToClipboard(
+                      getCollectionShareUrl(createdCollection.id)
+                    );
+                    if (ok) {
+                      setCopiedNewColLink(true);
+                      setTimeout(() => setCopiedNewColLink(false), 2000);
+                    }
+                  }}
+                  className="min-h-[40px] px-4 py-2 rounded-xl bg-white border border-black/[0.1] text-xs font-medium text-[#0A0A0A] hover:bg-black/[0.04] inline-flex items-center gap-1.5 transition-colors"
+                >
+                  {copiedNewColLink ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Link Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Link2 className="w-3.5 h-3.5" />
+                      <span>Copy Collection Link</span>
+                    </>
+                  )}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setConfirmationMessage(null)}
+                onClick={() => {
+                  setConfirmationMessage(null);
+                  setCreatedCollection(null);
+                }}
                 className="min-h-[40px] px-4 py-2 rounded-xl bg-white border border-black/[0.1] text-xs font-medium text-[#0A0A0A] hover:bg-black/[0.04] transition-colors"
               >
                 {mode === 'photo' ? 'Upload More' : 'Create Another'}
@@ -422,7 +492,7 @@ export const AddView: React.FC<AddViewProps> = ({
                 New Collection
               </h1>
               <p className="text-xs text-[#737373] mt-1">
-                Give your collection a clear name.
+                Choose a name and who can view the collection.
               </p>
             </div>
 
@@ -437,6 +507,23 @@ export const AddView: React.FC<AddViewProps> = ({
                 placeholder="e.g. Kyoto Autumn 2026"
                 className="w-full min-h-[46px] px-4 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
+                Privacy
+              </label>
+              <select
+                value={collectionPrivacy}
+                onChange={(e) =>
+                  setCollectionPrivacy(e.target.value as CollectionPrivacy)
+                }
+                className="w-full min-h-[46px] px-4 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
+              >
+                <option value="public">Public (Visible on Profile &amp; Photo Pages)</option>
+                <option value="unlisted">By Link (Only viewable with copied link)</option>
+                <option value="private">Private (Gallery only)</option>
+              </select>
             </div>
 
             <button
@@ -568,6 +655,7 @@ export const AddView: React.FC<AddViewProps> = ({
                       className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
                     >
                       <option value="public">Public (Feed &amp; Profile)</option>
+                      <option value="unlisted">By Link (Only via shared link)</option>
                       <option value="private">Private (Gallery only)</option>
                     </select>
                   </div>
@@ -660,6 +748,7 @@ export const AddView: React.FC<AddViewProps> = ({
                           className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-black/[0.08] text-base md:text-xs"
                         >
                           <option value="public">Public</option>
+                          <option value="unlisted">By Link</option>
                           <option value="private">Private</option>
                         </select>
 

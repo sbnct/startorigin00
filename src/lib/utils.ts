@@ -49,3 +49,47 @@ export function getInitials(name?: string | null): string {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
+
+export function getPhotoShareUrl(photoId: string): string {
+  if (typeof window === 'undefined') return `/?photo=${encodeURIComponent(photoId)}`;
+  return `${window.location.origin}/?photo=${encodeURIComponent(photoId)}`;
+}
+
+export function getCollectionShareUrl(collectionId: string): string {
+  if (typeof window === 'undefined') return `/?collection=${encodeURIComponent(collectionId)}`;
+  return `${window.location.origin}/?collection=${encodeURIComponent(collectionId)}`;
+}
+
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fallback below
+  }
+
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    textarea.style.pointerEvents = 'none';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+export function getVisibilityLabel(privacy?: string | null): string {
+  if (privacy === 'private') return 'Private';
+  if (privacy === 'unlisted') return 'By Link';
+  return 'Public';
+}
+

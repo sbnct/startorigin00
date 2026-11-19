@@ -33,9 +33,18 @@ CREATE TABLE IF NOT EXISTS public.collections (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   name text NOT NULL,
+  privacy text NOT NULL DEFAULT 'public' CHECK (privacy IN ('public', 'unlisted', 'private')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE public.collections
+  ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'public';
+
+ALTER TABLE public.collections
+  DROP CONSTRAINT IF EXISTS collections_privacy_check;
+ALTER TABLE public.collections
+  ADD CONSTRAINT collections_privacy_check CHECK (privacy IN ('public', 'unlisted', 'private'));
 
 CREATE INDEX IF NOT EXISTS collections_user_id_idx ON public.collections (user_id);
 
@@ -46,11 +55,16 @@ CREATE TABLE IF NOT EXISTS public.photos (
   title text NOT NULL,
   image_url text NOT NULL,
   storage_path text,
-  privacy text NOT NULL DEFAULT 'public' CHECK (privacy IN ('public', 'private')),
+  privacy text NOT NULL DEFAULT 'public' CHECK (privacy IN ('public', 'unlisted', 'private')),
   tags text[] NOT NULL DEFAULT '{}',
   photo_date date NOT NULL DEFAULT CURRENT_DATE,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+ALTER TABLE public.photos
+  DROP CONSTRAINT IF EXISTS photos_privacy_check;
+ALTER TABLE public.photos
+  ADD CONSTRAINT photos_privacy_check CHECK (privacy IN ('public', 'unlisted', 'private'));
 
 CREATE INDEX IF NOT EXISTS photos_user_id_idx ON public.photos (user_id);
 CREATE INDEX IF NOT EXISTS photos_collection_id_idx ON public.photos (collection_id);
@@ -253,14 +267,7 @@ CREATE POLICY "Users can view own or public collections"
   ON public.collections FOR SELECT
   USING (
     auth.uid() = user_id
-    OR EXISTS (
-      SELECT 1 FROM public.photos p
-      WHERE p.collection_id = collections.id AND p.privacy = 'public'
-    )
-    OR EXISTS (
-      SELECT 1 FROM public.saved_collections sc
-      WHERE sc.collection_id = collections.id
-    )
+    OR privacy IN ('public', 'unlisted')
   );
 
 DROP POLICY IF EXISTS "Users can create own collections" ON public.collections;
@@ -283,7 +290,7 @@ CREATE POLICY "Users can delete own collections"
 DROP POLICY IF EXISTS "Public photos are viewable by all; private by owner" ON public.photos;
 CREATE POLICY "Public photos are viewable by all; private by owner"
   ON public.photos FOR SELECT
-  USING (privacy = 'public' OR auth.uid() = user_id);
+  USING (privacy IN ('public', 'unlisted') OR auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "Users can insert own photos" ON public.photos;
 CREATE POLICY "Users can insert own photos"

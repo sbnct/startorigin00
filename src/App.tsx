@@ -9,6 +9,7 @@ import { AddView } from './components/AddView';
 import { GalleryView } from './components/GalleryView';
 import { ProfileView } from './components/ProfileView';
 import { PostPageView } from './components/PostPageView';
+import { CollectionView } from './components/CollectionView';
 import { CinemaModal } from './components/CinemaModal';
 import { AuthView } from './components/AuthView';
 import { OfflineIndicator } from './components/OfflineIndicator';
@@ -17,6 +18,7 @@ import { AdminView } from './components/AdminView';
 interface RouteEntry {
   tab: NavTab;
   postId?: string;
+  collectionId?: string;
   profileUserId?: string;
 }
 
@@ -25,11 +27,38 @@ function isAdminPath(): boolean {
   return window.location.pathname.replace(/\/+$/, '') === '/admin';
 }
 
+function getInitialRouteStack(): RouteEntry[] {
+  if (typeof window === 'undefined') return [{ tab: 'feed' }];
+  const params = new URLSearchParams(window.location.search);
+  const photoParam = params.get('photo');
+  if (photoParam) {
+    return [{ tab: 'feed' }, { tab: 'feed', postId: photoParam }];
+  }
+  const colParam = params.get('collection');
+  if (colParam) {
+    return [{ tab: 'feed' }, { tab: 'feed', collectionId: colParam }];
+  }
+  return [{ tab: 'feed' }];
+}
+
+function syncUrlForRoute(entry: RouteEntry) {
+  if (typeof window === 'undefined' || isAdminPath()) return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete('photo');
+  url.searchParams.delete('collection');
+  if (entry.postId) {
+    url.searchParams.set('photo', entry.postId);
+  } else if (entry.collectionId) {
+    url.searchParams.set('collection', entry.collectionId);
+  }
+  window.history.replaceState({}, '', url.pathname + url.search);
+}
+
 export default function App() {
   const [isAdminRoute, setIsAdminRoute] = useState<boolean>(isAdminPath);
   const [session, setSession] = useState<Session | null>(null);
   const [currentUserProfile, setCurrentUserProfile] = useState<Profile | null>(null);
-  const [routeStack, setRouteStack] = useState<RouteEntry[]>([{ tab: 'feed' }]);
+  const [routeStack, setRouteStack] = useState<RouteEntry[]>(getInitialRouteStack);
   const [cinemaPhoto, setCinemaPhoto] = useState<CinemaPhoto | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -44,6 +73,10 @@ export default function App() {
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
+
+  useEffect(() => {
+    syncUrlForRoute(currentRoute);
+  }, [currentRoute]);
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -122,6 +155,14 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleOpenCollection = (collectionId: string) => {
+    setRouteStack((prev) => [
+      ...prev,
+      { tab: currentRoute.tab, collectionId },
+    ]);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleOpenProfile = (userId: string) => {
     if (session?.user?.id === userId) {
       setRouteStack([{ tab: 'profile' }]);
@@ -189,9 +230,26 @@ export default function App() {
           onBack={handleBack}
           onOpenCinema={setCinemaPhoto}
           onOpenPost={handleOpenPost}
+          onOpenCollection={handleOpenCollection}
           onOpenProfile={handleOpenProfile}
           onOpenProfileByUsername={handleOpenProfileByUsername}
           onRequireAuth={() => setAuthModalOpen(true)}
+          onShowToast={showToast}
+        />
+      );
+    }
+
+    if (currentRoute.collectionId) {
+      return (
+        <CollectionView
+          collectionId={currentRoute.collectionId}
+          currentUserId={session?.user?.id || null}
+          onBack={handleBack}
+          onOpenPost={handleOpenPost}
+          onOpenCinema={setCinemaPhoto}
+          onOpenProfile={handleOpenProfile}
+          onRequireAuth={() => setAuthModalOpen(true)}
+          onShowToast={showToast}
         />
       );
     }
@@ -208,12 +266,14 @@ export default function App() {
             bumpRefresh();
           }}
           onOpenPost={handleOpenPost}
+          onOpenCollection={handleOpenCollection}
           onProfileUpdated={() => {
             loadCurrentProfile(session);
             bumpRefresh();
           }}
           onRequireAuth={() => setAuthModalOpen(true)}
           onSignOut={handleSignOut}
+          onShowToast={showToast}
           refreshKey={refreshKey}
         />
       );
@@ -229,6 +289,7 @@ export default function App() {
             onOpenProfile={handleOpenProfile}
             onOpenProfileByUsername={handleOpenProfileByUsername}
             onRequireAuth={() => setAuthModalOpen(true)}
+            onShowToast={showToast}
             refreshKey={refreshKey}
           />
         );
@@ -263,6 +324,7 @@ export default function App() {
             }}
             onOpenCinema={setCinemaPhoto}
             onDataChanged={bumpRefresh}
+            onShowToast={showToast}
             refreshKey={refreshKey}
           />
         );
@@ -276,12 +338,14 @@ export default function App() {
               bumpRefresh();
             }}
             onOpenPost={handleOpenPost}
+            onOpenCollection={handleOpenCollection}
             onProfileUpdated={() => {
               loadCurrentProfile(session);
               bumpRefresh();
             }}
             onRequireAuth={() => setAuthModalOpen(true)}
             onSignOut={handleSignOut}
+            onShowToast={showToast}
             refreshKey={refreshKey}
           />
         );

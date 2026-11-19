@@ -1,8 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Bookmark, Heart, Maximize2 } from 'lucide-react';
+import { ArrowLeft, Bookmark, Check, ChevronRight, Folder, Heart, Link2, Maximize2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { CinemaPhoto, PhotoWithAuthor } from '../types';
-import { formatDate, getInitials } from '../lib/utils';
+import {
+  copyTextToClipboard,
+  formatDate,
+  getInitials,
+  getPhotoShareUrl,
+} from '../lib/utils';
 import { MentionText } from './MentionText';
 import { ResilientImage } from './ResilientImage';
 import { VerifiedBadge } from './VerifiedBadge';
@@ -15,9 +20,11 @@ interface PostPageViewProps {
   onBack: () => void;
   onOpenCinema: (photo: CinemaPhoto) => void;
   onOpenPost: (photoId: string) => void;
+  onOpenCollection: (collectionId: string) => void;
   onOpenProfile: (userId: string) => void;
   onOpenProfileByUsername: (username: string) => void;
   onRequireAuth: () => void;
+  onShowToast?: (msg: string) => void;
 }
 
 export const PostPageView: React.FC<PostPageViewProps> = ({
@@ -26,14 +33,17 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
   onBack,
   onOpenCinema,
   onOpenPost,
+  onOpenCollection,
   onOpenProfile,
   onOpenProfileByUsername,
   onRequireAuth,
+  onShowToast,
 }) => {
   const [photo, setPhoto] = useState<PhotoWithAuthor | null>(null);
   const [likesCount, setLikesCount] = useState(0);
   const [likedByMe, setLikedByMe] = useState(false);
   const [photoSaved, setPhotoSaved] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [recommended, setRecommended] = useState<PhotoWithAuthor[]>([]);
   const [recLikeCounts, setRecLikeCounts] = useState<Record<string, number>>({});
   const [recLikedIds, setRecLikedIds] = useState<Set<string>>(new Set());
@@ -51,7 +61,7 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
           `
           *,
           profiles:user_id (id, name, username, avatar_url),
-          collections:collection_id (id, name)
+          collections:collection_id (*)
         `
         )
         .eq('id', photoId)
@@ -64,6 +74,11 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
       }
 
       const typedPhoto = photoData as PhotoWithAuthor;
+      if (typedPhoto.privacy === 'private' && typedPhoto.user_id !== currentUserId) {
+        setPhoto(null);
+        setLoading(false);
+        return;
+      }
       setPhoto(typedPhoto);
 
       // Load likes count & whether current user liked
@@ -377,12 +392,21 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
             <span className="tabular-nums">
               {formatDate(photo.photo_date || photo.created_at)}
             </span>
-            {photo.collections?.name && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>{photo.collections.name}</span>
-              </>
-            )}
+            {photo.collections &&
+              (photo.collections.privacy || 'public') === 'public' && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <button
+                    type="button"
+                    onClick={() => onOpenCollection(photo.collections!.id)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A] font-medium transition-colors"
+                  >
+                    <Folder className="w-3.5 h-3.5" strokeWidth={1.75} />
+                    <span>{photo.collections.name}</span>
+                    <ChevronRight className="w-3 h-3 text-[#737373]" />
+                  </button>
+                </>
+              )}
             {photo.tags && photo.tags.length > 0 && (
               <>
                 <span aria-hidden="true">·</span>
@@ -425,7 +449,7 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
             type="button"
             onClick={handleToggleLike}
@@ -459,6 +483,31 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
               strokeWidth={1.75}
             />
             <span>{photoSaved ? 'Saved' : 'Save'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={async () => {
+              const ok = await copyTextToClipboard(getPhotoShareUrl(photo.id));
+              if (ok) {
+                setCopiedLink(true);
+                onShowToast?.('Photo link copied');
+                setTimeout(() => setCopiedLink(false), 2000);
+              }
+            }}
+            className="min-h-[44px] px-4 py-2 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-2 transition-colors"
+          >
+            {copiedLink ? (
+              <>
+                <Check className="w-4 h-4" strokeWidth={2} />
+                <span>Copied</span>
+              </>
+            ) : (
+              <>
+                <Link2 className="w-4 h-4" strokeWidth={1.75} />
+                <span>Copy Link</span>
+              </>
+            )}
           </button>
         </div>
       </div>

@@ -1,6 +1,8 @@
 export type NavTab = 'feed' | 'search' | 'add' | 'gallery' | 'profile';
 
-export type PhotoPrivacy = 'public' | 'private';
+export type VisibilityLevel = 'public' | 'unlisted' | 'private';
+export type PhotoPrivacy = VisibilityLevel;
+export type CollectionPrivacy = VisibilityLevel;
 
 export interface Profile {
   id: string;
@@ -17,6 +19,7 @@ export interface Collection {
   id: string;
   user_id: string;
   name: string;
+  privacy?: CollectionPrivacy;
   created_at: string;
   updated_at: string;
 }
@@ -36,7 +39,7 @@ export interface Photo {
 
 export interface PhotoWithAuthor extends Photo {
   profiles?: Pick<Profile, 'id' | 'name' | 'username' | 'avatar_url' | 'is_verified'> | null;
-  collections?: Pick<Collection, 'id' | 'name'> | null;
+  collections?: Pick<Collection, 'id' | 'name' | 'privacy'> | null;
   likes_count?: number;
   liked_by_me?: boolean;
 }
