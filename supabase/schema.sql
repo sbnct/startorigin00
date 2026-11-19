@@ -90,11 +90,21 @@ CREATE TABLE IF NOT EXISTS public.saved_collections (
 
 CREATE INDEX IF NOT EXISTS saved_collections_user_idx ON public.saved_collections (user_id);
 
+CREATE TABLE IF NOT EXISTS public.saved_photos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  photo_id uuid NOT NULL REFERENCES public.photos(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, photo_id)
+);
+
+CREATE INDEX IF NOT EXISTS saved_photos_user_idx ON public.saved_photos (user_id);
+
 CREATE TABLE IF NOT EXISTS public.activity_logs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   actor_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
-  action_type text NOT NULL CHECK (action_type IN ('upload', 'collection', 'like', 'subscribe', 'save_collection')),
+  action_type text NOT NULL CHECK (action_type IN ('upload', 'collection', 'like', 'subscribe', 'save_collection', 'save_photo')),
   target_id uuid,
   description text NOT NULL,
   is_public boolean NOT NULL DEFAULT true,
@@ -217,6 +227,7 @@ ALTER TABLE public.photos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.photo_likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.saved_collections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.saved_photos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
 
 -- Profiles Policies
@@ -336,6 +347,22 @@ CREATE POLICY "Users can save collections for themselves"
 DROP POLICY IF EXISTS "Users can unsave own saved collections" ON public.saved_collections;
 CREATE POLICY "Users can unsave own saved collections"
   ON public.saved_collections FOR DELETE
+  USING (auth.uid() = user_id);
+
+-- Saved Photos Policies
+DROP POLICY IF EXISTS "Saved photos are viewable by everyone" ON public.saved_photos;
+CREATE POLICY "Saved photos are viewable by everyone"
+  ON public.saved_photos FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "Users can save photos for themselves" ON public.saved_photos;
+CREATE POLICY "Users can save photos for themselves"
+  ON public.saved_photos FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can unsave own saved photos" ON public.saved_photos;
+CREATE POLICY "Users can unsave own saved photos"
+  ON public.saved_photos FOR DELETE
   USING (auth.uid() = user_id);
 
 -- Activity Logs Policies

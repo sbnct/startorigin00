@@ -45,11 +45,19 @@ export interface ActivityLog {
   id: string;
   user_id: string;
   actor_id: string | null;
-  action_type: 'upload' | 'collection' | 'like' | 'subscribe' | 'save_collection';
+  action_type: 'upload' | 'collection' | 'like' | 'subscribe' | 'save_collection' | 'save_photo';
   target_id: string | null;
   description: string;
   is_public: boolean;
   created_at: string;
+}
+
+export interface SavedPhotoItem {
+  id: string;
+  user_id: string;
+  photo_id: string;
+  created_at: string;
+  photos?: PhotoWithAuthor | null;
 }
 
 export interface SavedCollectionItem {

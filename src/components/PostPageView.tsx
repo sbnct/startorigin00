@@ -6,6 +6,8 @@ import { formatDate, getInitials } from '../lib/utils';
 import { MentionText } from './MentionText';
 import { ResilientImage } from './ResilientImage';
 import { VerifiedBadge } from './VerifiedBadge';
+import { LikeButton } from './LikeButton';
+import { fetchPhotoLikesMap, togglePhotoLike } from '../lib/likes';
 
 interface PostPageViewProps {
   photoId: string;
@@ -31,8 +33,11 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
   const [photo, setPhoto] = useState<PhotoWithAuthor | null>(null);
   const [likesCount, setLikesCount] = useState(0);
   const [likedByMe, setLikedByMe] = useState(false);
-  const [collectionSaved, setCollectionSaved] = useState(false);
+  const [photoSaved, setPhotoSaved] = useState(false);
   const [recommended, setRecommended] = useState<PhotoWithAuthor[]>([]);
+  const [recLikeCounts, setRecLikeCounts] = useState<Record<string, number>>({});
+  const [recLikedIds, setRecLikedIds] = useState<Set<string>>(new Set());
+  const [recLikeBusyIds, setRecLikeBusyIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [likeBusy, setLikeBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
@@ -78,20 +83,16 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
           .maybeSingle();
         setLikedByMe(Boolean(myLike));
 
-        if (typedPhoto.collection_id) {
-          const { data: savedRow } = await supabase
-            .from('saved_collections')
-            .select('id')
-            .eq('user_id', currentUserId)
-            .eq('collection_id', typedPhoto.collection_id)
-            .maybeSingle();
-          setCollectionSaved(Boolean(savedRow));
-        } else {
-          setCollectionSaved(false);
-        }
+        const { data: savedRow } = await supabase
+          .from('saved_photos')
+          .select('id')
+          .eq('user_id', currentUserId)
+          .eq('photo_id', photoId)
+          .maybeSingle();
+        setPhotoSaved(Boolean(savedRow));
       } else {
         setLikedByMe(false);
-        setCollectionSaved(false);
+        setPhotoSaved(false);
       }
 
       // Load up to 20 similar / recommended public photos
@@ -140,6 +141,72 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
     loadPost();
   }, [loadPost]);
 
+  useEffect(() => {
+    let active = true;
+    const ids = recommended.map((p) => p.id);
+    if (ids.length === 0) {
+      setRecLikeCounts({});
+      setRecLikedIds(new Set());
+      return;
+    }
+    fetchPhotoLikesMap(ids, currentUserId).then((res) => {
+      if (!active) return;
+      setRecLikeCounts(res.counts);
+      setRecLikedIds(res.likedIds);
+    });
+    return () => {
+      active = false;
+    };
+  }, [recommended, currentUserId]);
+
+  const handleToggleRecommendedLike = async (item: PhotoWithAuthor) => {
+    if (!currentUserId) {
+      onRequireAuth();
+      return;
+    }
+    if (recLikeBusyIds.has(item.id)) return;
+
+    const currentlyLiked = recLikedIds.has(item.id);
+    setRecLikeBusyIds((prev) => new Set(prev).add(item.id));
+    setRecLikedIds((prev) => {
+      const next = new Set(prev);
+      if (currentlyLiked) next.delete(item.id);
+      else next.add(item.id);
+      return next;
+    });
+    setRecLikeCounts((prev) => ({
+      ...prev,
+      [item.id]: Math.max(0, (prev[item.id] || 0) + (currentlyLiked ? -1 : 1)),
+    }));
+
+    try {
+      const ok = await togglePhotoLike(
+        item.id,
+        item.title,
+        currentUserId,
+        currentlyLiked
+      );
+      if (!ok) {
+        setRecLikedIds((prev) => {
+          const next = new Set(prev);
+          if (currentlyLiked) next.add(item.id);
+          else next.delete(item.id);
+          return next;
+        });
+        setRecLikeCounts((prev) => ({
+          ...prev,
+          [item.id]: Math.max(0, (prev[item.id] || 0) + (currentlyLiked ? 1 : -1)),
+        }));
+      }
+    } finally {
+      setRecLikeBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  };
+
   const handleToggleLike = async () => {
     if (!currentUserId) {
       onRequireAuth();
@@ -181,36 +248,40 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
     }
   };
 
-  const handleToggleSaveCollection = async () => {
+  const handleToggleSavePhoto = async () => {
     if (!currentUserId) {
       onRequireAuth();
       return;
     }
-    if (!photo?.collection_id || saveBusy) return;
+    if (!photo || saveBusy) return;
     setSaveBusy(true);
     try {
-      if (collectionSaved) {
+      if (photoSaved) {
         const { error } = await supabase
-          .from('saved_collections')
+          .from('saved_photos')
           .delete()
           .eq('user_id', currentUserId)
-          .eq('collection_id', photo.collection_id);
-        if (!error) setCollectionSaved(false);
+          .eq('photo_id', photo.id);
+        if (!error) setPhotoSaved(false);
       } else {
-        const { error } = await supabase.from('saved_collections').insert({
+        const { error } = await supabase.from('saved_photos').insert({
           user_id: currentUserId,
-          collection_id: photo.collection_id,
+          photo_id: photo.id,
         });
         if (!error) {
-          setCollectionSaved(true);
-          await supabase.from('activity_logs').insert({
-            user_id: currentUserId,
-            actor_id: currentUserId,
-            action_type: 'save_collection',
-            target_id: photo.collection_id,
-            description: `Saved collection "${photo.collections?.name || 'Collection'}"`,
-            is_public: true,
-          });
+          setPhotoSaved(true);
+          try {
+            await supabase.from('activity_logs').insert({
+              user_id: currentUserId,
+              actor_id: currentUserId,
+              action_type: 'save_photo',
+              target_id: photo.id,
+              description: `Saved photo "${photo.title}"`,
+              is_public: true,
+            });
+          } catch {
+            // Non-fatal if activity_logs check constraint hasn't been updated
+          }
         }
       }
     } finally {
@@ -373,24 +444,22 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
             <span>{likesCount === 1 ? 'Like' : 'Likes'}</span>
           </button>
 
-          {photo.collection_id && (
-            <button
-              type="button"
-              onClick={handleToggleSaveCollection}
-              disabled={saveBusy}
-              className={`min-h-[44px] px-4 py-2 rounded-xl border text-xs font-medium inline-flex items-center gap-2 transition-colors ${
-                collectionSaved
-                  ? 'bg-[#0A0A0A] text-white border-[#0A0A0A]'
-                  : 'bg-white text-[#0A0A0A] border-black/[0.12] hover:bg-[#F5F5F7]'
-              }`}
-            >
-              <Bookmark
-                className={`w-4 h-4 ${collectionSaved ? 'fill-white' : ''}`}
-                strokeWidth={1.75}
-              />
-              <span>{collectionSaved ? 'Saved' : 'Save Collection'}</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleToggleSavePhoto}
+            disabled={saveBusy}
+            className={`min-h-[44px] px-4 py-2 rounded-xl border text-xs font-medium inline-flex items-center gap-2 transition-colors ${
+              photoSaved
+                ? 'bg-[#0A0A0A] text-white border-[#0A0A0A]'
+                : 'bg-white text-[#0A0A0A] border-black/[0.12] hover:bg-[#F5F5F7]'
+            }`}
+          >
+            <Bookmark
+              className={`w-4 h-4 ${photoSaved ? 'fill-white' : ''}`}
+              strokeWidth={1.75}
+            />
+            <span>{photoSaved ? 'Saved' : 'Save'}</span>
+          </button>
         </div>
       </div>
 
@@ -412,27 +481,43 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
             {recommended.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onOpenPost(item.id)}
-                className="group text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
-              >
-                <ResilientImage
-                  src={item.image_url}
-                  alt={item.title}
-                  containerClassName="aspect-square rounded-2xl border border-black/[0.06]"
-                  className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
-                />
-                <p className="text-xs font-medium text-[#0A0A0A] truncate mt-2">
-                  {item.title}
-                </p>
-                {item.profiles && (
-                  <p className="text-[11px] text-[#737373] truncate">
-                    @{item.profiles.username}
-                  </p>
-                )}
-              </button>
+              <div key={item.id} className="group flex flex-col">
+                <button
+                  type="button"
+                  onClick={() => onOpenPost(item.id)}
+                  className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
+                >
+                  <ResilientImage
+                    src={item.image_url}
+                    alt={item.title}
+                    containerClassName="aspect-square rounded-2xl border border-black/[0.06]"
+                    className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+                  />
+                </button>
+                <div className="flex items-start justify-between gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => onOpenPost(item.id)}
+                    className="text-left min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-black rounded-lg"
+                  >
+                    <p className="text-xs font-medium text-[#0A0A0A] truncate">
+                      {item.title}
+                    </p>
+                    {item.profiles && (
+                      <p className="text-[11px] text-[#737373] truncate">
+                        @{item.profiles.username}
+                      </p>
+                    )}
+                  </button>
+                  <LikeButton
+                    compact
+                    liked={recLikedIds.has(item.id)}
+                    count={recLikeCounts[item.id] || 0}
+                    busy={recLikeBusyIds.has(item.id)}
+                    onToggle={() => handleToggleRecommendedLike(item)}
+                  />
+                </div>
+              </div>
             ))}
           </div>
         )}

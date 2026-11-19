@@ -6,6 +6,8 @@ import { formatDate, getInitials } from '../lib/utils';
 import { MentionText } from './MentionText';
 import { ResilientImage } from './ResilientImage';
 import { VerifiedBadge } from './VerifiedBadge';
+import { LikeButton } from './LikeButton';
+import { fetchPhotoLikesMap, togglePhotoLike } from '../lib/likes';
 
 interface FeedViewProps {
   currentUserId: string | null;
@@ -28,6 +30,9 @@ export const FeedView: React.FC<FeedViewProps> = ({
 }) => {
   const [feedFilter, setFeedFilter] = useState<'all' | 'following'>('all');
   const [photos, setPhotos] = useState<PhotoWithAuthor[]>([]);
+  const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+  const [likeBusyIds, setLikeBusyIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,6 +114,72 @@ export const FeedView: React.FC<FeedViewProps> = ({
   useEffect(() => {
     loadFeed();
   }, [loadFeed, refreshKey]);
+
+  useEffect(() => {
+    let active = true;
+    const ids = photos.map((p) => p.id);
+    if (ids.length === 0) {
+      setLikeCounts({});
+      setLikedIds(new Set());
+      return;
+    }
+    fetchPhotoLikesMap(ids, currentUserId).then((res) => {
+      if (!active) return;
+      setLikeCounts(res.counts);
+      setLikedIds(res.likedIds);
+    });
+    return () => {
+      active = false;
+    };
+  }, [photos, currentUserId]);
+
+  const handleToggleLike = async (photo: PhotoWithAuthor) => {
+    if (!currentUserId) {
+      onRequireAuth();
+      return;
+    }
+    if (likeBusyIds.has(photo.id)) return;
+
+    const currentlyLiked = likedIds.has(photo.id);
+    setLikeBusyIds((prev) => new Set(prev).add(photo.id));
+    setLikedIds((prev) => {
+      const next = new Set(prev);
+      if (currentlyLiked) next.delete(photo.id);
+      else next.add(photo.id);
+      return next;
+    });
+    setLikeCounts((prev) => ({
+      ...prev,
+      [photo.id]: Math.max(0, (prev[photo.id] || 0) + (currentlyLiked ? -1 : 1)),
+    }));
+
+    try {
+      const ok = await togglePhotoLike(
+        photo.id,
+        photo.title,
+        currentUserId,
+        currentlyLiked
+      );
+      if (!ok) {
+        setLikedIds((prev) => {
+          const next = new Set(prev);
+          if (currentlyLiked) next.add(photo.id);
+          else next.delete(photo.id);
+          return next;
+        });
+        setLikeCounts((prev) => ({
+          ...prev,
+          [photo.id]: Math.max(0, (prev[photo.id] || 0) + (currentlyLiked ? 1 : -1)),
+        }));
+      }
+    } finally {
+      setLikeBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(photo.id);
+        return next;
+      });
+    }
+  };
 
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
@@ -246,23 +317,32 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 />
               </button>
 
-              {/* Below photo: Post Name (opens Post Page; @mentions open User Profile) & Profile Link */}
-              <div className="mt-3.5 space-y-2">
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => onOpenPost(photo.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      onOpenPost(photo.id);
-                    }
-                  }}
-                  className="text-base font-medium text-[#0A0A0A] hover:opacity-75 transition-opacity cursor-pointer leading-snug"
-                >
-                  <MentionText
-                    text={photo.title}
-                    onMentionClick={onOpenProfileByUsername}
+              {/* Below photo: Post Name (opens Post Page; @mentions open User Profile), Like Button Container & Profile Link */}
+              <div className="mt-3.5 space-y-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onOpenPost(photo.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onOpenPost(photo.id);
+                      }
+                    }}
+                    className="text-base font-medium text-[#0A0A0A] hover:opacity-75 transition-opacity cursor-pointer leading-snug min-w-0 pt-1"
+                  >
+                    <MentionText
+                      text={photo.title}
+                      onMentionClick={onOpenProfileByUsername}
+                    />
+                  </div>
+
+                  <LikeButton
+                    liked={likedIds.has(photo.id)}
+                    count={likeCounts[photo.id] || 0}
+                    busy={likeBusyIds.has(photo.id)}
+                    onToggle={() => handleToggleLike(photo)}
                   />
                 </div>
 

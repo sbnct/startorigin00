@@ -4,7 +4,6 @@ import {
   Bookmark,
   Camera,
   Check,
-  Folder,
   LogOut,
   Pencil,
   UserPlus,
@@ -15,7 +14,7 @@ import {
   ActivityLog,
   Photo,
   Profile,
-  SavedCollectionItem,
+  SavedPhotoItem,
 } from '../types';
 import {
   formatDate,
@@ -27,6 +26,8 @@ import { AuthView } from './AuthView';
 import { ResilientImage } from './ResilientImage';
 import { VerifiedBadge } from './VerifiedBadge';
 import { PWAInstallButton } from './PWAInstallButton';
+import { LikeButton } from './LikeButton';
+import { fetchPhotoLikesMap, togglePhotoLike } from '../lib/likes';
 
 interface ProfileViewProps {
   targetUserId: string | null;
@@ -36,6 +37,7 @@ interface ProfileViewProps {
   onAuthSuccess: () => void;
   onOpenPost: (photoId: string) => void;
   onProfileUpdated: () => void;
+  onRequireAuth: () => void;
   onSignOut?: () => void;
   refreshKey: number;
 }
@@ -48,6 +50,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onAuthSuccess,
   onOpenPost,
   onProfileUpdated,
+  onRequireAuth,
   onSignOut,
   refreshKey,
 }) => {
@@ -58,16 +61,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [publicPhotos, setPublicPhotos] = useState<Photo[]>([]);
-  const [savedCollections, setSavedCollections] = useState<SavedCollectionItem[]>([]);
+  const [savedPhotos, setSavedPhotos] = useState<SavedPhotoItem[]>([]);
+  const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+  const [likeBusyIds, setLikeBusyIds] = useState<Set<string>>(new Set());
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [subscribersCount, setSubscribersCount] = useState(0);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [activeTab, setActiveTab] = useState<'photos' | 'saved' | 'activity'>('photos');
-  const [openedSavedCollection, setOpenedSavedCollection] = useState<{
-    id: string;
-    name: string;
-    photos: Photo[];
-  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [subBusy, setSubBusy] = useState(false);
 
@@ -110,16 +111,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           .order('created_at', { ascending: false })
           .limit(30),
         supabase
-          .from('saved_collections')
+          .from('saved_photos')
           .select(
             `
             *,
-            collections:collection_id (
-              id,
-              user_id,
-              name,
-              created_at,
-              updated_at,
+            photos:photo_id (
+              *,
               profiles:user_id (id, name, username, avatar_url)
             )
           `
@@ -133,35 +130,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       setSubscribersCount(subCount || 0);
       setActivities((actData as ActivityLog[]) || []);
 
-      // Load preview public photos for each saved collection
-      const rawSaved = (savedData as SavedCollectionItem[]) || [];
-      const colIds = rawSaved.map((s) => s.collection_id).filter(Boolean);
-      if (colIds.length > 0) {
-        const { data: colPhotos } = await supabase
-          .from('photos')
-          .select('*')
-          .in('collection_id', colIds)
-          .eq('privacy', 'public')
-          .order('created_at', { ascending: false });
-
-        const allColPhotos = (colPhotos as Photo[]) || [];
-        const enriched = rawSaved.map((item) => {
-          const matching = allColPhotos.filter((p) => p.collection_id === item.collection_id);
-          return {
-            ...item,
-            collections: item.collections
-              ? {
-                  ...item.collections,
-                  preview_photos: matching.slice(0, 4),
-                  photo_count: matching.length,
-                }
-              : null,
-          };
-        });
-        setSavedCollections(enriched);
-      } else {
-        setSavedCollections([]);
-      }
+      const rawSaved = (savedData as SavedPhotoItem[]) || [];
+      setSavedPhotos(
+        rawSaved.filter(
+          (item) =>
+            item.photos &&
+            (item.photos.privacy === 'public' || item.photos.user_id === currentUserId)
+        )
+      );
 
       if (currentUserId && currentUserId !== effectiveUserId) {
         const { data: mySub } = await supabase
@@ -180,9 +156,79 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   }, [effectiveUserId, currentUserId]);
 
   useEffect(() => {
-    setOpenedSavedCollection(null);
     loadProfileData();
   }, [loadProfileData, refreshKey]);
+
+  useEffect(() => {
+    let active = true;
+    const ids = Array.from(
+      new Set([
+        ...publicPhotos.map((p) => p.id),
+        ...savedPhotos.map((s) => s.photos?.id).filter((id): id is string => Boolean(id)),
+      ])
+    );
+    if (ids.length === 0) {
+      setLikeCounts({});
+      setLikedIds(new Set());
+      return;
+    }
+    fetchPhotoLikesMap(ids, currentUserId).then((res) => {
+      if (!active) return;
+      setLikeCounts(res.counts);
+      setLikedIds(res.likedIds);
+    });
+    return () => {
+      active = false;
+    };
+  }, [publicPhotos, savedPhotos, currentUserId]);
+
+  const handleToggleLike = async (photo: { id: string; title: string }) => {
+    if (!currentUserId) {
+      onRequireAuth();
+      return;
+    }
+    if (likeBusyIds.has(photo.id)) return;
+
+    const currentlyLiked = likedIds.has(photo.id);
+    setLikeBusyIds((prev) => new Set(prev).add(photo.id));
+    setLikedIds((prev) => {
+      const next = new Set(prev);
+      if (currentlyLiked) next.delete(photo.id);
+      else next.add(photo.id);
+      return next;
+    });
+    setLikeCounts((prev) => ({
+      ...prev,
+      [photo.id]: Math.max(0, (prev[photo.id] || 0) + (currentlyLiked ? -1 : 1)),
+    }));
+
+    try {
+      const ok = await togglePhotoLike(
+        photo.id,
+        photo.title,
+        currentUserId,
+        currentlyLiked
+      );
+      if (!ok) {
+        setLikedIds((prev) => {
+          const next = new Set(prev);
+          if (currentlyLiked) next.add(photo.id);
+          else next.delete(photo.id);
+          return next;
+        });
+        setLikeCounts((prev) => ({
+          ...prev,
+          [photo.id]: Math.max(0, (prev[photo.id] || 0) + (currentlyLiked ? 1 : -1)),
+        }));
+      }
+    } finally {
+      setLikeBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(photo.id);
+        return next;
+      });
+    }
+  };
 
   if (!effectiveUserId) {
     return (
@@ -325,21 +371,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     } finally {
       setEditSaving(false);
     }
-  };
-
-  const handleOpenSavedCollection = async (item: SavedCollectionItem) => {
-    if (!item.collections) return;
-    const { data } = await supabase
-      .from('photos')
-      .select('*')
-      .eq('collection_id', item.collection_id)
-      .eq('privacy', 'public')
-      .order('created_at', { ascending: false });
-    setOpenedSavedCollection({
-      id: item.collection_id,
-      name: item.collections.name,
-      photos: (data as Photo[]) || [],
-    });
   };
 
   if (loading) {
@@ -503,10 +534,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       <div className="flex items-center gap-1 p-1 bg-[#F5F5F7] rounded-xl my-6 w-full sm:w-fit overflow-x-auto">
         <button
           type="button"
-          onClick={() => {
-            setActiveTab('photos');
-            setOpenedSavedCollection(null);
-          }}
+          onClick={() => setActiveTab('photos')}
           className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
             activeTab === 'photos'
               ? 'bg-white text-[#0A0A0A] shadow-xs'
@@ -517,24 +545,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </button>
         <button
           type="button"
-          onClick={() => {
-            setActiveTab('saved');
-            setOpenedSavedCollection(null);
-          }}
+          onClick={() => setActiveTab('saved')}
           className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
             activeTab === 'saved'
               ? 'bg-white text-[#0A0A0A] shadow-xs'
               : 'text-[#737373] hover:text-[#0A0A0A]'
           }`}
         >
-          Saved Collections
+          Saved Photos
         </button>
         <button
           type="button"
-          onClick={() => {
-            setActiveTab('activity');
-            setOpenedSavedCollection(null);
-          }}
+          onClick={() => setActiveTab('activity')}
           className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
             activeTab === 'activity'
               ? 'bg-white text-[#0A0A0A] shadow-xs'
@@ -556,59 +578,68 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
               {publicPhotos.map((photo) => (
-                <button
-                  key={photo.id}
-                  type="button"
-                  onClick={() => onOpenPost(photo.id)}
-                  className="group text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
-                >
-                  <ResilientImage
-                    src={photo.image_url}
-                    alt={photo.title}
-                    containerClassName="aspect-square rounded-2xl border border-black/[0.06]"
-                    className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
-                  />
-                  <p className="text-xs font-medium text-[#0A0A0A] truncate mt-2">
-                    {photo.title}
-                  </p>
-                  <p className="text-[11px] text-[#737373] tabular-nums">
-                    {formatDate(photo.photo_date || photo.created_at)}
-                  </p>
-                </button>
+                <div key={photo.id} className="group flex flex-col">
+                  <button
+                    type="button"
+                    onClick={() => onOpenPost(photo.id)}
+                    className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
+                  >
+                    <ResilientImage
+                      src={photo.image_url}
+                      alt={photo.title}
+                      containerClassName="aspect-square rounded-2xl border border-black/[0.06]"
+                      className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+                    />
+                  </button>
+                  <div className="flex items-start justify-between gap-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => onOpenPost(photo.id)}
+                      className="text-left min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-black rounded-lg"
+                    >
+                      <p className="text-xs font-medium text-[#0A0A0A] truncate">
+                        {photo.title}
+                      </p>
+                      <p className="text-[11px] text-[#737373] tabular-nums">
+                        {formatDate(photo.photo_date || photo.created_at)}
+                      </p>
+                    </button>
+                    <LikeButton
+                      compact
+                      liked={likedIds.has(photo.id)}
+                      count={likeCounts[photo.id] || 0}
+                      busy={likeBusyIds.has(photo.id)}
+                      onToggle={() => handleToggleLike(photo)}
+                    />
+                  </div>
+                </div>
               ))}
             </div>
           )}
         </div>
       )}
 
-      {/* Tab 2: Saved Collections */}
+      {/* Tab 2: Saved Photos */}
       {activeTab === 'saved' && (
         <div>
-          {openedSavedCollection ? (
-            <div className="space-y-5">
-              <button
-                type="button"
-                onClick={() => setOpenedSavedCollection(null)}
-                className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium inline-flex items-center gap-2"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Back to Saved Collections</span>
-              </button>
-              <h2 className="text-base font-semibold text-[#0A0A0A]">
-                {openedSavedCollection.name}
-              </h2>
-              {openedSavedCollection.photos.length === 0 ? (
-                <p className="text-xs text-[#737373]">
-                  No public photos in this collection.
-                </p>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
-                  {openedSavedCollection.photos.map((photo) => (
+          {savedPhotos.length === 0 ? (
+            <div className="py-16 text-center rounded-3xl border border-black/[0.06] bg-[#FAFAFA]">
+              <Bookmark className="w-6 h-6 mx-auto text-[#737373] mb-2" strokeWidth={1.5} />
+              <p className="text-xs text-[#737373]">
+                No saved photos yet. Save a photo from any post page.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+              {savedPhotos.map((item) => {
+                const photo = item.photos;
+                if (!photo) return null;
+                return (
+                  <div key={item.id} className="group flex flex-col">
                     <button
-                      key={photo.id}
                       type="button"
                       onClick={() => onOpenPost(photo.id)}
-                      className="group text-left rounded-2xl"
+                      className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
                     >
                       <ResilientImage
                         src={photo.image_url}
@@ -616,59 +647,30 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         containerClassName="aspect-square rounded-2xl border border-black/[0.06]"
                         className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
                       />
-                      <p className="text-xs font-medium text-[#0A0A0A] truncate mt-2">
-                        {photo.title}
-                      </p>
                     </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : savedCollections.length === 0 ? (
-            <div className="py-16 text-center rounded-3xl border border-black/[0.06] bg-[#FAFAFA]">
-              <Bookmark className="w-6 h-6 mx-auto text-[#737373] mb-2" strokeWidth={1.5} />
-              <p className="text-xs text-[#737373]">
-                No saved collections yet. Save a collection from any post page.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {savedCollections.map((item) => {
-                const col = item.collections;
-                if (!col) return null;
-                const previews = col.preview_photos || [];
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleOpenSavedCollection(item)}
-                    className="group text-left p-3.5 rounded-3xl border border-black/[0.08] bg-white hover:bg-[#F5F5F7] transition-colors"
-                  >
-                    <div className="grid grid-cols-2 gap-1.5 aspect-[4/3] rounded-2xl overflow-hidden bg-[#F5F5F7] mb-3">
-                      {previews.length === 0 ? (
-                        <div className="col-span-2 flex items-center justify-center text-[#737373]">
-                          <Folder className="w-5 h-5 opacity-40" />
-                        </div>
-                      ) : (
-                        previews.map((p) => (
-                          <ResilientImage
-                            key={p.id}
-                            src={p.image_url}
-                            alt={p.title}
-                            containerClassName="w-full h-full"
-                            className="w-full h-full object-cover"
-                          />
-                        ))
-                      )}
+                    <div className="flex items-start justify-between gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => onOpenPost(photo.id)}
+                        className="text-left min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-black rounded-lg"
+                      >
+                        <p className="text-xs font-medium text-[#0A0A0A] truncate">
+                          {photo.title}
+                        </p>
+                        <p className="text-[11px] text-[#737373] truncate tabular-nums">
+                          {photo.profiles ? `@${photo.profiles.username} · ` : ''}
+                          {formatDate(photo.photo_date || photo.created_at)}
+                        </p>
+                      </button>
+                      <LikeButton
+                        compact
+                        liked={likedIds.has(photo.id)}
+                        count={likeCounts[photo.id] || 0}
+                        busy={likeBusyIds.has(photo.id)}
+                        onToggle={() => handleToggleLike(photo)}
+                      />
                     </div>
-                    <p className="text-sm font-semibold text-[#0A0A0A] truncate">
-                      {col.name}
-                    </p>
-                    <p className="text-[11px] text-[#737373] tabular-nums">
-                      {col.profiles ? `@${col.profiles.username} · ` : ''}
-                      {col.photo_count || 0} photos
-                    </p>
-                  </button>
+                  </div>
                 );
               })}
             </div>

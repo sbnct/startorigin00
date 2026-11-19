@@ -212,6 +212,7 @@ export default function App() {
             loadCurrentProfile(session);
             bumpRefresh();
           }}
+          onRequireAuth={() => setAuthModalOpen(true)}
           onSignOut={handleSignOut}
           refreshKey={refreshKey}
         />
@@ -234,8 +235,10 @@ export default function App() {
       case 'search':
         return (
           <SearchView
+            currentUserId={session?.user?.id || null}
             onOpenPost={handleOpenPost}
             onOpenProfile={handleOpenProfile}
+            onRequireAuth={() => setAuthModalOpen(true)}
           />
         );
       case 'add':
@@ -277,6 +280,7 @@ export default function App() {
               loadCurrentProfile(session);
               bumpRefresh();
             }}
+            onRequireAuth={() => setAuthModalOpen(true)}
             onSignOut={handleSignOut}
             refreshKey={refreshKey}
           />
