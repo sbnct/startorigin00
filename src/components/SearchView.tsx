@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Search as SearchIcon, User as UserIcon, X } from 'lucide-react';
+import { Pin, Search as SearchIcon, User as UserIcon, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { CinemaPhoto, PhotoWithAuthor, Profile } from '../types';
 import { formatDate, getInitials } from '../lib/utils';
@@ -38,7 +38,16 @@ export const SearchView: React.FC<SearchViewProps> = ({
       setLoading(true);
       try {
         if (!trimmed) {
-          const [{ data: recentUsers }, { data: recentPhotos }] = await Promise.all([
+          const [
+            { data: pinnedSubnocte },
+            { data: recentUsers },
+            { data: recentPhotos },
+          ] = await Promise.all([
+            supabase
+              .from('profiles')
+              .select('*')
+              .ilike('username', 'subnocte')
+              .maybeSingle(),
             supabase
               .from('profiles')
               .select('*')
@@ -51,7 +60,16 @@ export const SearchView: React.FC<SearchViewProps> = ({
               .order('created_at', { ascending: false })
               .limit(18),
           ]);
-          setUsers((recentUsers as Profile[]) || []);
+          const combinedUsers: Profile[] = [];
+          if (pinnedSubnocte) {
+            combinedUsers.push(pinnedSubnocte as Profile);
+          }
+          for (const u of (recentUsers as Profile[]) || []) {
+            if (!combinedUsers.some((existing) => existing.id === u.id)) {
+              combinedUsers.push(u);
+            }
+          }
+          setUsers(combinedUsers);
           setPhotos((recentPhotos as PhotoWithAuthor[]) || []);
           return;
         }
@@ -72,7 +90,15 @@ export const SearchView: React.FC<SearchViewProps> = ({
             .limit(36),
         ]);
 
-        setUsers((matchedUsers as Profile[]) || []);
+        const sortedMatchedUsers = [...((matchedUsers as Profile[]) || [])].sort(
+          (a, b) => {
+            const aPinned = a.username.toLowerCase() === 'subnocte' ? 1 : 0;
+            const bPinned = b.username.toLowerCase() === 'subnocte' ? 1 : 0;
+            return bPinned - aPinned;
+          }
+        );
+
+        setUsers(sortedMatchedUsers);
         setPhotos((matchedPhotos as PhotoWithAuthor[]) || []);
       } finally {
         setLoading(false);
@@ -169,7 +195,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search users or photos by name..."
+          placeholder="Search..."
           className="w-full min-h-[48px] pl-11 pr-11 py-3 rounded-2xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
         />
         {query && (
@@ -242,13 +268,20 @@ export const SearchView: React.FC<SearchViewProps> = ({
                       {getInitials(u.name)}
                     </div>
                   )}
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1">
                       <p className="text-sm font-medium text-[#0A0A0A] truncate">{u.name}</p>
                       <VerifiedBadge username={u.username} isVerified={u.is_verified} />
                     </div>
                     <p className="text-xs text-[#737373] truncate">@{u.username}</p>
                   </div>
+                  {u.username.toLowerCase() === 'subnocte' && (
+                    <Pin
+                      className="w-3.5 h-3.5 text-[#737373] shrink-0"
+                      strokeWidth={1.75}
+                      aria-label="Pinned creator"
+                    />
+                  )}
                 </button>
               ))}
             </div>

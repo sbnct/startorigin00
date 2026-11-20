@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS public.collections (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   name text NOT NULL,
-  privacy text NOT NULL DEFAULT 'public' CHECK (privacy IN ('public', 'unlisted', 'private')),
+  privacy text NOT NULL DEFAULT 'public' CHECK (privacy IN ('public', 'followers', 'unlisted', 'private')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -44,7 +44,7 @@ ALTER TABLE public.collections
 ALTER TABLE public.collections
   DROP CONSTRAINT IF EXISTS collections_privacy_check;
 ALTER TABLE public.collections
-  ADD CONSTRAINT collections_privacy_check CHECK (privacy IN ('public', 'unlisted', 'private'));
+  ADD CONSTRAINT collections_privacy_check CHECK (privacy IN ('public', 'followers', 'unlisted', 'private'));
 
 CREATE INDEX IF NOT EXISTS collections_user_id_idx ON public.collections (user_id);
 
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS public.photos (
   title text NOT NULL,
   image_url text NOT NULL,
   storage_path text,
-  privacy text NOT NULL DEFAULT 'public' CHECK (privacy IN ('public', 'unlisted', 'private')),
+  privacy text NOT NULL DEFAULT 'public' CHECK (privacy IN ('public', 'followers', 'unlisted', 'private')),
   tags text[] NOT NULL DEFAULT '{}',
   photo_date date NOT NULL DEFAULT CURRENT_DATE,
   created_at timestamptz NOT NULL DEFAULT now()
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS public.photos (
 ALTER TABLE public.photos
   DROP CONSTRAINT IF EXISTS photos_privacy_check;
 ALTER TABLE public.photos
-  ADD CONSTRAINT photos_privacy_check CHECK (privacy IN ('public', 'unlisted', 'private'));
+  ADD CONSTRAINT photos_privacy_check CHECK (privacy IN ('public', 'followers', 'unlisted', 'private'));
 
 CREATE INDEX IF NOT EXISTS photos_user_id_idx ON public.photos (user_id);
 CREATE INDEX IF NOT EXISTS photos_collection_id_idx ON public.photos (collection_id);
@@ -93,6 +93,20 @@ CREATE TABLE IF NOT EXISTS public.subscriptions (
 
 CREATE INDEX IF NOT EXISTS subscriptions_target_idx ON public.subscriptions (target_user_id);
 CREATE INDEX IF NOT EXISTS subscriptions_subscriber_idx ON public.subscriptions (subscriber_id);
+
+CREATE TABLE IF NOT EXISTS public.subscription_restrictions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  restricted_user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (owner_id, restricted_user_id),
+  CHECK (owner_id <> restricted_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS subscription_restrictions_owner_idx
+  ON public.subscription_restrictions (owner_id);
+CREATE INDEX IF NOT EXISTS subscription_restrictions_user_idx
+  ON public.subscription_restrictions (restricted_user_id);
 
 CREATE TABLE IF NOT EXISTS public.saved_collections (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -240,6 +254,7 @@ ALTER TABLE public.collections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.photos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.photo_likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subscription_restrictions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.saved_collections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.saved_photos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
@@ -268,6 +283,16 @@ CREATE POLICY "Users can view own or public collections"
   USING (
     auth.uid() = user_id
     OR privacy IN ('public', 'unlisted')
+    OR (
+      privacy = 'followers'
+      AND auth.uid() IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM public.subscriptions s
+        WHERE s.subscriber_id = auth.uid()
+          AND s.target_user_id = collections.user_id
+      )
+    )
   );
 
 DROP POLICY IF EXISTS "Users can create own collections" ON public.collections;
@@ -290,7 +315,20 @@ CREATE POLICY "Users can delete own collections"
 DROP POLICY IF EXISTS "Public photos are viewable by all; private by owner" ON public.photos;
 CREATE POLICY "Public photos are viewable by all; private by owner"
   ON public.photos FOR SELECT
-  USING (privacy IN ('public', 'unlisted') OR auth.uid() = user_id);
+  USING (
+    privacy IN ('public', 'unlisted')
+    OR auth.uid() = user_id
+    OR (
+      privacy = 'followers'
+      AND auth.uid() IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM public.subscriptions s
+        WHERE s.subscriber_id = auth.uid()
+          AND s.target_user_id = photos.user_id
+      )
+    )
+  );
 
 DROP POLICY IF EXISTS "Users can insert own photos" ON public.photos;
 CREATE POLICY "Users can insert own photos"
@@ -333,12 +371,37 @@ CREATE POLICY "Subscriptions are viewable by everyone"
 DROP POLICY IF EXISTS "Users can subscribe as themselves" ON public.subscriptions;
 CREATE POLICY "Users can subscribe as themselves"
   ON public.subscriptions FOR INSERT
-  WITH CHECK (auth.uid() = subscriber_id AND subscriber_id <> target_user_id);
+  WITH CHECK (
+    auth.uid() = subscriber_id
+    AND subscriber_id <> target_user_id
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.subscription_restrictions r
+      WHERE r.owner_id = target_user_id
+        AND r.restricted_user_id = auth.uid()
+    )
+  );
 
 DROP POLICY IF EXISTS "Users can unsubscribe themselves" ON public.subscriptions;
 CREATE POLICY "Users can unsubscribe themselves"
   ON public.subscriptions FOR DELETE
-  USING (auth.uid() = subscriber_id);
+  USING (auth.uid() = subscriber_id OR auth.uid() = target_user_id);
+
+-- Subscription Restrictions Policies
+DROP POLICY IF EXISTS "Owners and restricted users can view restrictions" ON public.subscription_restrictions;
+CREATE POLICY "Owners and restricted users can view restrictions"
+  ON public.subscription_restrictions FOR SELECT
+  USING (auth.uid() = owner_id OR auth.uid() = restricted_user_id);
+
+DROP POLICY IF EXISTS "Owners can restrict users from subscribing" ON public.subscription_restrictions;
+CREATE POLICY "Owners can restrict users from subscribing"
+  ON public.subscription_restrictions FOR INSERT
+  WITH CHECK (auth.uid() = owner_id AND owner_id <> restricted_user_id);
+
+DROP POLICY IF EXISTS "Owners can allow restricted users again" ON public.subscription_restrictions;
+CREATE POLICY "Owners can allow restricted users again"
+  ON public.subscription_restrictions FOR DELETE
+  USING (auth.uid() = owner_id);
 
 -- Saved Collections Policies
 DROP POLICY IF EXISTS "Saved collections are viewable by everyone" ON public.saved_collections;
@@ -479,7 +542,7 @@ DECLARE
   v_likes_received int := 0;
   v_verified boolean := false;
 BEGIN
-  IF p_user_id IS NULL THEN
+  IF p_user_id IS NULL OR NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = p_user_id) THEN
     RETURN;
   END IF;
 

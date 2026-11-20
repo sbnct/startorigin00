@@ -1,6 +1,6 @@
 export type NavTab = 'feed' | 'search' | 'add' | 'gallery' | 'profile';
 
-export type VisibilityLevel = 'public' | 'unlisted' | 'private';
+export type VisibilityLevel = 'public' | 'followers' | 'unlisted' | 'private';
 export type PhotoPrivacy = VisibilityLevel;
 export type CollectionPrivacy = VisibilityLevel;
 

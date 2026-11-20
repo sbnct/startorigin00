@@ -90,6 +90,7 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
 export function getVisibilityLabel(privacy?: string | null): string {
   if (privacy === 'private') return 'Private';
   if (privacy === 'unlisted') return 'By Link';
+  if (privacy === 'followers') return 'Followers';
   return 'Public';
 }
 

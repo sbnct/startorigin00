@@ -7,6 +7,7 @@ import {
   Link2,
   Lock,
   Plus,
+  Users,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
@@ -87,8 +88,26 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
 
       const typedCol = colData as CollectionWithAuthor;
       const colPrivacy = (typedCol.privacy || 'public') as CollectionPrivacy;
+      const isOwner = Boolean(currentUserId && typedCol.user_id === currentUserId);
+      let isFollower = false;
 
-      if (colPrivacy === 'private' && typedCol.user_id !== currentUserId) {
+      if (!isOwner && currentUserId) {
+        const { data: subRow } = await supabase
+          .from('subscriptions')
+          .select('id')
+          .eq('subscriber_id', currentUserId)
+          .eq('target_user_id', typedCol.user_id)
+          .maybeSingle();
+        isFollower = Boolean(subRow);
+      }
+
+      if (colPrivacy === 'private' && !isOwner) {
+        setCollection(null);
+        setPhotos([]);
+        return;
+      }
+
+      if (colPrivacy === 'followers' && !isOwner && !isFollower) {
         setCollection(null);
         setPhotos([]);
         return;
@@ -107,10 +126,20 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
         .eq('collection_id', collectionId)
         .order('created_at', { ascending: false });
 
-      if (colPrivacy === 'public') {
-        query = query.eq('privacy', 'public');
-      } else if (colPrivacy === 'unlisted') {
-        query = query.in('privacy', ['public', 'unlisted']);
+      if (!isOwner) {
+        if (isFollower) {
+          if (colPrivacy === 'unlisted') {
+            query = query.in('privacy', ['public', 'followers', 'unlisted']);
+          } else {
+            query = query.in('privacy', ['public', 'followers']);
+          }
+        } else {
+          if (colPrivacy === 'unlisted') {
+            query = query.in('privacy', ['public', 'unlisted']);
+          } else {
+            query = query.eq('privacy', 'public');
+          }
+        }
       }
 
       const { data: photoRows } = await query;
@@ -236,7 +265,18 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
           <ArrowLeft className="w-4 h-4" />
           <span>Go Back</span>
         </button>
-        <p className="text-sm text-[#737373]">This collection is private or unavailable.</p>
+        <p className="text-sm text-[#737373]">
+          This collection is private, for followers only, or unavailable.
+        </p>
+        {!currentUserId && (
+          <button
+            type="button"
+            onClick={onRequireAuth}
+            className="min-h-[42px] px-4 py-2 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium hover:bg-black/85 transition-colors"
+          >
+            Sign In to Check Access
+          </button>
+        )}
       </div>
     );
   }
@@ -261,28 +301,25 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
             <button
               type="button"
               onClick={() => setAddModalOpen(true)}
-              className="min-h-[44px] px-4 py-2 rounded-xl bg-[#0A0A0A] hover:bg-black/85 text-xs font-medium text-white inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              aria-label="Add photo"
+              title="Add photo"
+              className="min-h-[44px] min-w-[44px] p-2.5 rounded-xl bg-[#0A0A0A] hover:bg-black/85 text-white inline-flex items-center justify-center transition-colors"
             >
-              <Plus className="w-3.5 h-3.5" strokeWidth={2} />
-              <span>Add Photo</span>
+              <Plus className="w-4 h-4" strokeWidth={2} />
             </button>
           )}
 
           <button
             type="button"
             onClick={handleCopyCollectionLink}
-            className="min-h-[44px] px-4 py-2 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-2 transition-colors whitespace-nowrap"
+            aria-label={copiedLink ? 'Link copied' : 'Copy link'}
+            title={copiedLink ? 'Link copied' : 'Copy link'}
+            className="min-h-[44px] min-w-[44px] p-2.5 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
           >
             {copiedLink ? (
-              <>
-                <Check className="w-3.5 h-3.5" strokeWidth={2} />
-                <span>Link Copied</span>
-              </>
+              <Check className="w-4 h-4" strokeWidth={2} />
             ) : (
-              <>
-                <Link2 className="w-3.5 h-3.5" strokeWidth={1.75} />
-                <span>Copy Link</span>
-              </>
+              <Link2 className="w-4 h-4" strokeWidth={1.75} />
             )}
           </button>
         </div>
@@ -296,6 +333,8 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
               <Lock className="w-3 h-3" strokeWidth={1.75} />
             ) : colPrivacy === 'unlisted' ? (
               <Link2 className="w-3 h-3" strokeWidth={1.75} />
+            ) : colPrivacy === 'followers' ? (
+              <Users className="w-3 h-3" strokeWidth={1.75} />
             ) : (
               <Globe className="w-3 h-3" strokeWidth={1.75} />
             )}
@@ -337,7 +376,7 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
         </div>
 
         <p className="text-xs text-[#737373] tabular-nums">
-          {photos.length} {photos.length === 1 ? 'photo' : 'photos'}
+          {photos.length}
         </p>
       </div>
 

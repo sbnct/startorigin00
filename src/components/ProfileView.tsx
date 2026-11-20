@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ArrowLeft,
+  Ban,
   Bookmark,
   Camera,
   Check,
@@ -8,7 +9,10 @@ import {
   Link2,
   LogOut,
   Pencil,
+  UserCheck,
   UserPlus,
+  UserX,
+  Users,
   X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -92,6 +96,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [subscribersCount, setSubscribersCount] = useState(0);
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const [isRestrictedByOwner, setIsRestrictedByOwner] = useState(false);
   const [achievements, setAchievements] = useState<AchievementStatus[]>([]);
   const [selectedBadge, setSelectedBadge] = useState<AchievementStatus | null>(null);
   const [activeTab, setActiveTab] = useState<
@@ -99,6 +104,19 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   >('photos');
   const [loading, setLoading] = useState(true);
   const [subBusy, setSubBusy] = useState(false);
+
+  // Subscribers & Restrictions management modal (own profile)
+  const [subscribersModalOpen, setSubscribersModalOpen] = useState(false);
+  const [subscribersModalTab, setSubscribersModalTab] = useState<'subscribers' | 'restricted'>('subscribers');
+  const [subscribersList, setSubscribersList] = useState<
+    Array<{ id: string; name: string; username: string; avatar_url: string }>
+  >([]);
+  const [restrictedList, setRestrictedList] = useState<
+    Array<{ id: string; name: string; username: string; avatar_url: string }>
+  >([]);
+  const [subscribersLoading, setSubscribersLoading] = useState(false);
+  const [subscriberActionId, setSubscriberActionId] = useState<string | null>(null);
+  const [subscribersError, setSubscribersError] = useState<string | null>(null);
 
   // Edit profile modal state
   const [editOpen, setEditOpen] = useState(false);
@@ -114,6 +132,37 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     if (!effectiveUserId) return;
     setLoading(true);
     try {
+      let viewerIsSubscriber = false;
+      let viewerIsRestricted = false;
+      const myFollowingIds = new Set<string>();
+
+      if (currentUserId) {
+        const { data: myFollowingRows } = await supabase
+          .from('subscriptions')
+          .select('target_user_id')
+          .eq('subscriber_id', currentUserId);
+        for (const r of myFollowingRows || []) {
+          myFollowingIds.add(String(r.target_user_id));
+        }
+        if (currentUserId !== effectiveUserId) {
+          viewerIsSubscriber = myFollowingIds.has(effectiveUserId);
+          try {
+            const { data: restrRow } = await supabase
+              .from('subscription_restrictions')
+              .select('id')
+              .eq('owner_id', effectiveUserId)
+              .eq('restricted_user_id', currentUserId)
+              .maybeSingle();
+            viewerIsRestricted = Boolean(restrRow);
+          } catch {
+            viewerIsRestricted = false;
+          }
+        }
+      }
+
+      const canSeeFollowersContent =
+        (Boolean(currentUserId) && currentUserId === effectiveUserId) || viewerIsSubscriber;
+
       const [
         { data: profData },
         { data: photosData },
@@ -127,7 +176,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           .from('photos')
           .select('*')
           .eq('user_id', effectiveUserId)
-          .eq('privacy', 'public')
+          .in('privacy', canSeeFollowersContent ? ['public', 'followers'] : ['public'])
           .order('created_at', { ascending: false }),
         supabase
           .from('collections')
@@ -162,33 +211,29 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       setProfile((profData as Profile) || null);
       setPublicPhotos((photosData as Photo[]) || []);
       setPublicCollections(
-        ((collectionsData as Collection[]) || []).filter(
-          (c) => (c.privacy || 'public') === 'public'
-        )
+        ((collectionsData as Collection[]) || []).filter((c) => {
+          const priv = c.privacy || 'public';
+          if (priv === 'public') return true;
+          if (priv === 'followers') return canSeeFollowersContent;
+          return false;
+        })
       );
       setSubscribersCount(subCount || 0);
       setActivities((actData as ActivityLog[]) || []);
+      setIsSubscribed(viewerIsSubscriber);
+      setIsRestrictedByOwner(viewerIsRestricted);
 
       const rawSaved = (savedData as SavedPhotoItem[]) || [];
       setSavedPhotos(
-        rawSaved.filter(
-          (item) =>
-            item.photos &&
-            (item.photos.privacy === 'public' || item.photos.user_id === currentUserId)
-        )
+        rawSaved.filter((item) => {
+          const ph = item.photos;
+          if (!ph) return false;
+          if (ph.privacy === 'public') return true;
+          if (currentUserId && ph.user_id === currentUserId) return true;
+          if (ph.privacy === 'followers' && myFollowingIds.has(ph.user_id)) return true;
+          return false;
+        })
       );
-
-      if (currentUserId && currentUserId !== effectiveUserId) {
-        const { data: mySub } = await supabase
-          .from('subscriptions')
-          .select('id')
-          .eq('subscriber_id', currentUserId)
-          .eq('target_user_id', effectiveUserId)
-          .maybeSingle();
-        setIsSubscribed(Boolean(mySub));
-      } else {
-        setIsSubscribed(false);
-      }
 
       const typedProfile = (profData as Profile) || null;
       if (currentUserId && currentUserId === effectiveUserId) {
@@ -320,8 +365,157 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     );
   }
 
+  const loadSubscribersModal = useCallback(async () => {
+    if (!currentUserId || !isOwnProfile) return;
+    setSubscribersLoading(true);
+    setSubscribersError(null);
+    try {
+      const [{ data: subRows, error: subErr }, restrRes] = await Promise.all([
+        supabase
+          .from('subscriptions')
+          .select('subscriber_id, profiles:subscriber_id (id, name, username, avatar_url)')
+          .eq('target_user_id', currentUserId)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('subscription_restrictions')
+          .select('restricted_user_id, profiles:restricted_user_id (id, name, username, avatar_url)')
+          .eq('owner_id', currentUserId)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      if (subErr) {
+        setSubscribersError(subErr.message);
+      } else {
+        const parsedSubs = (subRows || [])
+          .map((row: any) => row.profiles)
+          .filter(Boolean);
+        setSubscribersList(parsedSubs);
+      }
+
+      if (!restrRes.error) {
+        const parsedRestr = (restrRes.data || [])
+          .map((row: any) => row.profiles)
+          .filter(Boolean);
+        setRestrictedList(parsedRestr);
+      }
+    } finally {
+      setSubscribersLoading(false);
+    }
+  }, [currentUserId, isOwnProfile]);
+
+  const openSubscribersModal = () => {
+    if (!isOwnProfile) return;
+    setSubscribersModalTab('subscribers');
+    setSubscribersModalOpen(true);
+    loadSubscribersModal();
+  };
+
+  const handleRemoveSubscriber = async (subUser: {
+    id: string;
+    name: string;
+    username: string;
+    avatar_url: string;
+  }) => {
+    if (!currentUserId || subscriberActionId) return;
+    setSubscriberActionId(subUser.id);
+    setSubscribersError(null);
+    try {
+      const { error } = await supabase
+        .from('subscriptions')
+        .delete()
+        .eq('subscriber_id', subUser.id)
+        .eq('target_user_id', currentUserId);
+      if (error) {
+        setSubscribersError(error.message);
+        return;
+      }
+      setSubscribersList((prev) => prev.filter((u) => u.id !== subUser.id));
+      setSubscribersCount((c) => Math.max(0, c - 1));
+      onShowToast?.(`Removed @${subUser.username} from subscribers`);
+    } finally {
+      setSubscriberActionId(null);
+    }
+  };
+
+  const handleRestrictSubscriber = async (subUser: {
+    id: string;
+    name: string;
+    username: string;
+    avatar_url: string;
+  }) => {
+    if (!currentUserId || subscriberActionId) return;
+    setSubscriberActionId(subUser.id);
+    setSubscribersError(null);
+    try {
+      const { error: delErr } = await supabase
+        .from('subscriptions')
+        .delete()
+        .eq('subscriber_id', subUser.id)
+        .eq('target_user_id', currentUserId);
+      if (delErr) {
+        setSubscribersError(delErr.message);
+        return;
+      }
+
+      const { error: restrErr } = await supabase
+        .from('subscription_restrictions')
+        .upsert(
+          {
+            owner_id: currentUserId,
+            restricted_user_id: subUser.id,
+          },
+          { onConflict: 'owner_id,restricted_user_id' }
+        );
+
+      if (restrErr) {
+        setSubscribersError(restrErr.message);
+        return;
+      }
+
+      setSubscribersList((prev) => prev.filter((u) => u.id !== subUser.id));
+      setRestrictedList((prev) =>
+        prev.some((u) => u.id === subUser.id) ? prev : [subUser, ...prev]
+      );
+      setSubscribersCount((c) => Math.max(0, c - 1));
+      onShowToast?.(`Restricted @${subUser.username} from subscribing`);
+    } finally {
+      setSubscriberActionId(null);
+    }
+  };
+
+  const handleAllowUser = async (user: {
+    id: string;
+    name: string;
+    username: string;
+    avatar_url: string;
+  }) => {
+    if (!currentUserId || subscriberActionId) return;
+    setSubscriberActionId(user.id);
+    setSubscribersError(null);
+    try {
+      const { error } = await supabase
+        .from('subscription_restrictions')
+        .delete()
+        .eq('owner_id', currentUserId)
+        .eq('restricted_user_id', user.id);
+
+      if (error) {
+        setSubscribersError(error.message);
+        return;
+      }
+      setRestrictedList((prev) => prev.filter((u) => u.id !== user.id));
+      onShowToast?.(`Allowed @${user.username} to subscribe again`);
+    } finally {
+      setSubscriberActionId(null);
+    }
+  };
+
   const handleToggleSubscribe = async () => {
     if (!currentUserId || !profile || isOwnProfile || subBusy) return;
+    if (!isSubscribed && isRestrictedByOwner) {
+      onShowToast?.('You cannot subscribe to this user.');
+      return;
+    }
     setSubBusy(true);
     try {
       if (isSubscribed) {
@@ -339,19 +533,21 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           subscriber_id: currentUserId,
           target_user_id: profile.id,
         });
-        if (!error) {
-          setIsSubscribed(true);
-          setSubscribersCount((c) => c + 1);
-          await supabase.from('activity_logs').insert({
-            user_id: currentUserId,
-            actor_id: currentUserId,
-            action_type: 'subscribe',
-            target_id: profile.id,
-            description: `Subscribed to @${profile.username}`,
-            is_public: true,
-          });
-          syncAndNotifyAchievements(currentUserId, undefined, onShowToast);
+        if (error) {
+          onShowToast?.('You are restricted from subscribing to this user.');
+          return;
         }
+        setIsSubscribed(true);
+        setSubscribersCount((c) => c + 1);
+        await supabase.from('activity_logs').insert({
+          user_id: currentUserId,
+          actor_id: currentUserId,
+          action_type: 'subscribe',
+          target_id: profile.id,
+          description: `Subscribed to @${profile.username}`,
+          is_public: true,
+        });
+        syncAndNotifyAchievements(currentUserId, undefined, onShowToast);
       }
     } finally {
       setSubBusy(false);
@@ -549,12 +745,25 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 {publicPhotos.length === 1 ? 'photo' : 'photos'}
               </span>
               <span aria-hidden="true">·</span>
-              <span>
-                <strong className="font-semibold text-[#0A0A0A]">
-                  {subscribersCount}
-                </strong>{' '}
-                {subscribersCount === 1 ? 'subscriber' : 'subscribers'}
-              </span>
+              {isOwnProfile ? (
+                <button
+                  type="button"
+                  onClick={openSubscribersModal}
+                  className="hover:text-[#0A0A0A] hover:underline transition-colors focus-visible:outline-2 focus-visible:outline-black rounded"
+                >
+                  <strong className="font-semibold text-[#0A0A0A]">
+                    {subscribersCount}
+                  </strong>{' '}
+                  {subscribersCount === 1 ? 'subscriber' : 'subscribers'}
+                </button>
+              ) : (
+                <span>
+                  <strong className="font-semibold text-[#0A0A0A]">
+                    {subscribersCount}
+                  </strong>{' '}
+                  {subscribersCount === 1 ? 'subscriber' : 'subscribers'}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -585,28 +794,35 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               )}
             </>
           ) : currentUserId ? (
-            <button
-              type="button"
-              onClick={handleToggleSubscribe}
-              disabled={subBusy}
-              className={`min-h-[44px] px-5 py-2.5 rounded-xl text-xs font-medium inline-flex items-center gap-2 transition-colors whitespace-nowrap ${
-                isSubscribed
-                  ? 'bg-[#F5F5F7] text-[#0A0A0A] border border-black/[0.1]'
-                  : 'bg-[#0A0A0A] text-white hover:bg-black/85'
-              }`}
-            >
-              {isSubscribed ? (
-                <>
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Subscribed</span>
-                </>
-              ) : (
-                <>
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>Subscribe</span>
-                </>
-              )}
-            </button>
+            isRestrictedByOwner ? (
+              <span className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[#F5F5F7] border border-black/[0.08] text-xs font-medium text-[#737373] inline-flex items-center gap-2 whitespace-nowrap">
+                <Ban className="w-3.5 h-3.5" />
+                <span>Restricted</span>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={handleToggleSubscribe}
+                disabled={subBusy}
+                className={`min-h-[44px] px-5 py-2.5 rounded-xl text-xs font-medium inline-flex items-center gap-2 transition-colors whitespace-nowrap ${
+                  isSubscribed
+                    ? 'bg-[#F5F5F7] text-[#0A0A0A] border border-black/[0.1]'
+                    : 'bg-[#0A0A0A] text-white hover:bg-black/85'
+                }`}
+              >
+                {isSubscribed ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Subscribed</span>
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Subscribe</span>
+                  </>
+                )}
+              </button>
+            )
           ) : null}
         </div>
       </div>
@@ -789,7 +1005,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                           {col.name}
                         </h3>
                         <p className="text-xs text-[#737373] tabular-nums">
-                          {colPhotos.length} {colPhotos.length === 1 ? 'photo' : 'photos'}
+                          {colPhotos.length}
                         </p>
                       </button>
 
@@ -1132,7 +1348,191 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       )}
 
-      {/* Badge Detail Modal */}
+      {/* Subscribers & Restrictions Modal (Own Profile) */}
+      {subscribersModalOpen && isOwnProfile && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Manage subscribers"
+          onClick={() => setSubscribersModalOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md max-h-[85vh] flex flex-col bg-white border border-black/[0.08] rounded-3xl p-5 sm:p-6 space-y-4 shadow-2xl"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-[#0A0A0A]">
+                Subscribers
+              </h2>
+              <button
+                type="button"
+                onClick={() => setSubscribersModalOpen(false)}
+                aria-label="Close subscribers"
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-full bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="inline-flex items-center gap-1 p-1 bg-[#F5F5F7] rounded-xl self-start">
+              <button
+                type="button"
+                onClick={() => setSubscribersModalTab('subscribers')}
+                className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap tabular-nums ${
+                  subscribersModalTab === 'subscribers'
+                    ? 'bg-white text-[#0A0A0A] shadow-xs'
+                    : 'text-[#737373] hover:text-[#0A0A0A]'
+                }`}
+              >
+                Subscribers ({subscribersList.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubscribersModalTab('restricted')}
+                className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap tabular-nums ${
+                  subscribersModalTab === 'restricted'
+                    ? 'bg-white text-[#0A0A0A] shadow-xs'
+                    : 'text-[#737373] hover:text-[#0A0A0A]'
+                }`}
+              >
+                Restricted ({restrictedList.length})
+              </button>
+            </div>
+
+            {subscribersError && (
+              <div className="p-3 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-700">
+                {subscribersError}
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+              {subscribersLoading ? (
+                <div className="py-10 text-center text-xs text-[#737373]">
+                  Loading...
+                </div>
+              ) : subscribersModalTab === 'subscribers' ? (
+                subscribersList.length === 0 ? (
+                  <div className="py-12 text-center rounded-2xl border border-black/[0.06] bg-[#FAFAFA]">
+                    <Users className="w-6 h-6 mx-auto text-[#737373] mb-2" strokeWidth={1.5} />
+                    <p className="text-xs text-[#737373]">No subscribers yet.</p>
+                  </div>
+                ) : (
+                  subscribersList.map((subUser) => {
+                    const busy = subscriberActionId === subUser.id;
+                    return (
+                      <div
+                        key={subUser.id}
+                        className="p-3 rounded-2xl border border-black/[0.08] bg-white flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {subUser.avatar_url ? (
+                            <img
+                              src={subUser.avatar_url}
+                              alt={subUser.name}
+                              referrerPolicy="no-referrer"
+                              className="w-9 h-9 rounded-full object-cover border border-black/[0.08] shrink-0"
+                            />
+                          ) : (
+                            <span className="w-9 h-9 rounded-full bg-[#0A0A0A] text-white text-xs font-medium flex items-center justify-center shrink-0">
+                              {getInitials(subUser.name)}
+                            </span>
+                          )}
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1">
+                              <p className="text-xs font-semibold text-[#0A0A0A] truncate">
+                                {subUser.name}
+                              </p>
+                              <VerifiedBadge username={subUser.username} />
+                            </div>
+                            <p className="text-[11px] text-[#737373] truncate">
+                              @{subUser.username}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => handleRemoveSubscriber(subUser)}
+                            className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-[11px] font-medium text-[#0A0A0A] inline-flex items-center gap-1 transition-colors disabled:opacity-40 whitespace-nowrap"
+                          >
+                            <UserX className="w-3.5 h-3.5" />
+                            <span>Remove</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => handleRestrictSubscriber(subUser)}
+                            className="min-h-[34px] px-2.5 py-1.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-[11px] font-medium inline-flex items-center gap-1 transition-colors disabled:opacity-40 whitespace-nowrap"
+                          >
+                            <Ban className="w-3.5 h-3.5" />
+                            <span>Restrict</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )
+              ) : restrictedList.length === 0 ? (
+                <div className="py-12 text-center rounded-2xl border border-black/[0.06] bg-[#FAFAFA]">
+                  <Ban className="w-6 h-6 mx-auto text-[#737373] mb-2" strokeWidth={1.5} />
+                  <p className="text-xs text-[#737373]">No restricted users.</p>
+                </div>
+              ) : (
+                restrictedList.map((user) => {
+                  const busy = subscriberActionId === user.id;
+                  return (
+                    <div
+                      key={user.id}
+                      className="p-3 rounded-2xl border border-black/[0.08] bg-white flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {user.avatar_url ? (
+                          <img
+                            src={user.avatar_url}
+                            alt={user.name}
+                            referrerPolicy="no-referrer"
+                            className="w-9 h-9 rounded-full object-cover border border-black/[0.08] shrink-0"
+                          />
+                        ) : (
+                          <span className="w-9 h-9 rounded-full bg-[#0A0A0A] text-white text-xs font-medium flex items-center justify-center shrink-0">
+                            {getInitials(user.name)}
+                          </span>
+                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1">
+                            <p className="text-xs font-semibold text-[#0A0A0A] truncate">
+                              {user.name}
+                            </p>
+                            <VerifiedBadge username={user.username} />
+                          </div>
+                          <p className="text-[11px] text-[#737373] truncate">
+                            @{user.username}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => handleAllowUser(user)}
+                        className="min-h-[34px] px-3 py-1.5 rounded-xl bg-[#0A0A0A] hover:bg-black/85 text-white text-[11px] font-medium inline-flex items-center gap-1 transition-colors disabled:opacity-40 whitespace-nowrap shrink-0"
+                      >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        <span>Allow</span>
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Achievement Detail Modal */}
       <AchievementDetailModal
         status={selectedBadge}
         onClose={() => setSelectedBadge(null)}

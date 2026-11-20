@@ -13,6 +13,7 @@ import {
   Plus,
   Search,
   Trash2,
+  Users,
   X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -348,6 +349,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   const renderPrivacyIcon = (privacy?: VisibilityLevel) => {
     if (privacy === 'private') return <Lock className="w-3 h-3" strokeWidth={1.75} />;
     if (privacy === 'unlisted') return <Link2 className="w-3 h-3" strokeWidth={1.75} />;
+    if (privacy === 'followers') return <Users className="w-3 h-3" strokeWidth={1.75} />;
     return <Globe className="w-3 h-3" strokeWidth={1.75} />;
   };
 
@@ -506,19 +508,21 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                   onClick={() =>
                     setAddModalState({ open: true, collectionId: activeCollection.id })
                   }
-                  className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#0A0A0A] hover:bg-black/85 text-xs font-medium text-white inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                  aria-label="Add photo"
+                  title="Add photo"
+                  className="min-h-[40px] min-w-[40px] p-2.5 rounded-xl bg-[#0A0A0A] hover:bg-black/85 text-white inline-flex items-center justify-center transition-colors"
                 >
-                  <Plus className="w-3.5 h-3.5" strokeWidth={2} />
-                  <span>Add Photo</span>
+                  <Plus className="w-4 h-4" strokeWidth={2} />
                 </button>
 
                 <button
                   type="button"
                   onClick={() => handleCopyCollectionLink(activeCollection)}
-                  className="min-h-[40px] px-3.5 py-2 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-1.5 transition-colors"
+                  aria-label="Copy collection link"
+                  title="Copy link"
+                  className="min-h-[40px] min-w-[40px] p-2.5 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
                 >
-                  <Link2 className="w-3.5 h-3.5" strokeWidth={1.75} />
-                  <span>Copy Link</span>
+                  <Link2 className="w-4 h-4" strokeWidth={1.75} />
                 </button>
 
                 <button
@@ -528,10 +532,13 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                     setColPrivacyTarget(activeCollection);
                     setColPrivacyValue(activeCollection.privacy || 'public');
                   }}
-                  className="min-h-[40px] px-3.5 py-2 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-1.5 transition-colors"
+                  aria-label={`Collection privacy: ${getVisibilityLabel(
+                    activeCollection.privacy || 'public'
+                  )}`}
+                  title={`Privacy: ${getVisibilityLabel(activeCollection.privacy || 'public')}`}
+                  className="min-h-[40px] min-w-[40px] p-2.5 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
                 >
                   {renderPrivacyIcon(activeCollection.privacy || 'public')}
-                  <span>{getVisibilityLabel(activeCollection.privacy || 'public')}</span>
                 </button>
 
                 <button
@@ -541,10 +548,11 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                     setColRenameTarget(activeCollection);
                     setColRenameValue(activeCollection.name);
                   }}
-                  className="min-h-[40px] px-3.5 py-2 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-1.5 transition-colors"
+                  aria-label="Rename collection"
+                  title="Rename"
+                  className="min-h-[40px] min-w-[40px] p-2.5 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
                 >
-                  <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
-                  <span>Rename</span>
+                  <Pencil className="w-4 h-4" strokeWidth={1.75} />
                 </button>
               </div>
             </div>
@@ -555,8 +563,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               </h1>
               <p className="text-xs text-[#737373] mt-1 tabular-nums">
                 {getVisibilityLabel(activeCollection.privacy || 'public')} ·{' '}
-                {collectionPhotos.length}{' '}
-                {collectionPhotos.length === 1 ? 'photo' : 'photos'}
+                {collectionPhotos.length}
               </p>
             </div>
           </div>
@@ -580,7 +587,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             type="text"
             value={tagQuery}
             onChange={(e) => setTagQuery(e.target.value)}
-            placeholder="Filter by tag or name..."
+            placeholder="Search..."
             className="w-full min-h-[44px] pl-10 pr-10 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
           />
           {tagQuery && (
@@ -649,8 +656,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               <div className="flex items-baseline gap-2.5 min-w-0">
                 <h2 className="text-base font-semibold text-[#0A0A0A]">Unsorted Photos</h2>
                 <span className="text-xs text-[#737373] tabular-nums">
-                  {unsortedPhotos.length}{' '}
-                  {unsortedPhotos.length === 1 ? 'photo' : 'photos'}
+                  {unsortedPhotos.length}
                 </span>
               </div>
 
@@ -801,9 +807,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                             {renderPrivacyIcon(colPrivacy)}
                             <span>{getVisibilityLabel(colPrivacy)}</span>
                             <span aria-hidden="true">·</span>
-                            <span>
-                              {colPhotos.length} {colPhotos.length === 1 ? 'photo' : 'photos'}
-                            </span>
+                            <span>{colPhotos.length}</span>
                           </p>
                         </button>
 
@@ -813,10 +817,11 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                             e.stopPropagation();
                             setAddModalState({ open: true, collectionId: col.id });
                           }}
-                          className="min-h-[36px] px-3 py-1.5 rounded-xl bg-white border border-black/[0.1] hover:bg-[#0A0A0A] hover:text-white hover:border-[#0A0A0A] text-[#0A0A0A] text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
+                          aria-label={`Add photo to ${col.name}`}
+                          title="Add photo"
+                          className="min-h-[36px] min-w-[36px] p-2 rounded-xl bg-white border border-black/[0.1] hover:bg-[#0A0A0A] hover:text-white hover:border-[#0A0A0A] text-[#0A0A0A] inline-flex items-center justify-center transition-colors shrink-0"
                         >
-                          <Plus className="w-3.5 h-3.5" strokeWidth={2} />
-                          <span>Add Photo</span>
+                          <Plus className="w-4 h-4" strokeWidth={2} />
                         </button>
                       </div>
                     </div>
@@ -941,6 +946,11 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                     desc: 'Shown in Feed, Search, and Profile',
                   },
                   {
+                    value: 'followers',
+                    label: 'Followers',
+                    desc: 'Visible only to users subscribed to you',
+                  },
+                  {
                     value: 'unlisted',
                     label: 'By Link',
                     desc: 'Hidden from feeds; viewable only with copied link',
@@ -1062,6 +1072,11 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                     value: 'public',
                     label: 'Public',
                     desc: 'Visible on Profile & linked from public photo pages',
+                  },
+                  {
+                    value: 'followers',
+                    label: 'Followers',
+                    desc: 'Visible only to your followers (even with shared link)',
                   },
                   {
                     value: 'unlisted',

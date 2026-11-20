@@ -385,6 +385,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                   className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
                 >
                   <option value="public">Public (Feed &amp; Profile)</option>
+                  <option value="followers">Followers (Only subscribers)</option>
                   <option value="unlisted">By Link (Only via shared link)</option>
                   <option value="private">Private (Gallery only)</option>
                 </select>
@@ -477,6 +478,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                       className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-black/[0.08] text-base md:text-xs"
                     >
                       <option value="public">Public</option>
+                      <option value="followers">Followers</option>
                       <option value="unlisted">By Link</option>
                       <option value="private">Private</option>
                     </select>

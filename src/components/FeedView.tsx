@@ -82,7 +82,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
             profiles:user_id (id, name, username, avatar_url)
           `
           )
-          .eq('privacy', 'public')
+          .in('privacy', ['public', 'followers'])
           .in('user_id', followedIds)
           .order('created_at', { ascending: false })
           .limit(60);
@@ -412,6 +412,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                   )}
 
                   <span className="tabular-nums shrink-0">
+                    {photo.privacy === 'followers' ? 'Followers · ' : ''}
                     {formatDate(photo.photo_date || photo.created_at)}
                   </span>
                 </div>

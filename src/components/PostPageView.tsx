@@ -51,6 +51,7 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [likeBusy, setLikeBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
+  const [canSeeFollowersCollection, setCanSeeFollowersCollection] = useState(false);
 
   const loadPost = useCallback(async () => {
     setLoading(true);
@@ -74,11 +75,32 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
       }
 
       const typedPhoto = photoData as PhotoWithAuthor;
-      if (typedPhoto.privacy === 'private' && typedPhoto.user_id !== currentUserId) {
+      const isOwner = Boolean(currentUserId && typedPhoto.user_id === currentUserId);
+      let isFollower = false;
+
+      if (!isOwner && currentUserId) {
+        const { data: subRow } = await supabase
+          .from('subscriptions')
+          .select('id')
+          .eq('subscriber_id', currentUserId)
+          .eq('target_user_id', typedPhoto.user_id)
+          .maybeSingle();
+        isFollower = Boolean(subRow);
+      }
+
+      if (typedPhoto.privacy === 'private' && !isOwner) {
         setPhoto(null);
         setLoading(false);
         return;
       }
+
+      if (typedPhoto.privacy === 'followers' && !isOwner && !isFollower) {
+        setPhoto(null);
+        setLoading(false);
+        return;
+      }
+
+      setCanSeeFollowersCollection(isOwner || isFollower);
       setPhoto(typedPhoto);
 
       // Load likes count & whether current user liked
@@ -325,7 +347,9 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
           <ArrowLeft className="w-4 h-4" />
           <span>Go Back</span>
         </button>
-        <p className="text-sm text-[#737373]">This photo is unavailable or private.</p>
+        <p className="text-sm text-[#737373]">
+          This photo is private, for followers only, or unavailable.
+        </p>
       </div>
     );
   }
@@ -393,7 +417,9 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
               {formatDate(photo.photo_date || photo.created_at)}
             </span>
             {photo.collections &&
-              (photo.collections.privacy || 'public') === 'public' && (
+              ((photo.collections.privacy || 'public') === 'public' ||
+                (photo.collections.privacy === 'followers' &&
+                  canSeeFollowersCollection)) && (
                 <>
                   <span aria-hidden="true">·</span>
                   <button
