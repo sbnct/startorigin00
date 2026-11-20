@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { ArrowLeft, CheckCircle2, Mail, RefreshCw, X } from 'lucide-react';
+import { CheckCircle2, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { SwipeCaptcha } from './SwipeCaptcha';
 
 interface AuthViewProps {
   onSuccess: () => void;
@@ -17,17 +18,22 @@ export const AuthView: React.FC<AuthViewProps> = ({
   initialMode = 'signin',
   subtitle,
 }) => {
-  const [mode, setMode] = useState<'signin' | 'signup' | 'verify'>(initialMode);
+  const [mode, setMode] = useState<'signin' | 'signup'>(initialMode);
   const [identifier, setIdentifier] = useState('');
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [pendingVerifyEmail, setPendingVerifyEmail] = useState('');
+  const [captchaVerified, setCaptchaVerified] = useState(false);
+  const [captchaAttention, setCaptchaAttention] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+
+  const resetCaptcha = () => {
+    setCaptchaVerified(false);
+    setCaptchaAttention(false);
+  };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,6 +43,12 @@ export const AuthView: React.FC<AuthViewProps> = ({
     const rawId = identifier.trim();
     if (!rawId || !password) {
       setError('Enter your username or email and password.');
+      return;
+    }
+
+    if (!captchaVerified) {
+      setCaptchaAttention(true);
+      setError('Please swipe to verify you are not a robot.');
       return;
     }
 
@@ -59,13 +71,13 @@ export const AuthView: React.FC<AuthViewProps> = ({
 
           if (profErr || !profileRow?.email) {
             setError('No account found for that username.');
-            setLoading(false);
+            resetCaptcha();
             return;
           }
           loginEmail = profileRow.email;
         } else if (!rpcEmail) {
           setError('No account found for that username.');
-          setLoading(false);
+          resetCaptcha();
           return;
         } else {
           loginEmail = rpcEmail;
@@ -78,13 +90,8 @@ export const AuthView: React.FC<AuthViewProps> = ({
       });
 
       if (signInErr) {
-        if (signInErr.message.toLowerCase().includes('email not confirmed')) {
-          setPendingVerifyEmail(loginEmail);
-          setMode('verify');
-          setInfoMessage('Please verify your email address before signing in.');
-        } else {
-          setError(signInErr.message);
-        }
+        setError(signInErr.message);
+        resetCaptcha();
         return;
       }
 
@@ -120,6 +127,12 @@ export const AuthView: React.FC<AuthViewProps> = ({
       return;
     }
 
+    if (!captchaVerified) {
+      setCaptchaAttention(true);
+      setError('Please swipe to verify you are not a robot.');
+      return;
+    }
+
     setLoading(true);
     try {
       const { data: available, error: availErr } = await supabase.rpc(
@@ -129,7 +142,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
 
       if (!availErr && available === false) {
         setError('That username is already taken (usernames are case-insensitive).');
-        setLoading(false);
+        resetCaptcha();
         return;
       }
 
@@ -137,7 +150,6 @@ export const AuthView: React.FC<AuthViewProps> = ({
         email: trimmedEmail,
         password,
         options: {
-          emailRedirectTo: window.location.origin,
           data: {
             name: trimmedName,
             username: trimmedUsername,
@@ -151,40 +163,32 @@ export const AuthView: React.FC<AuthViewProps> = ({
         } else {
           setError(signUpErr.message);
         }
+        resetCaptcha();
         return;
       }
 
       if (data.session) {
         onSuccess();
-      } else {
-        setPendingVerifyEmail(trimmedEmail);
-        setMode('verify');
+        return;
       }
+
+      // Attempt immediate sign-in without requiring an email confirmation step
+      const { error: immediateSignInErr } = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      });
+
+      if (!immediateSignInErr) {
+        onSuccess();
+        return;
+      }
+
+      setInfoMessage('Account created. Sign in to continue.');
+      setMode('signin');
+      setIdentifier(trimmedUsername);
+      resetCaptcha();
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleResendVerification = async () => {
-    if (!pendingVerifyEmail) return;
-    setResending(true);
-    setError(null);
-    setInfoMessage(null);
-    try {
-      const { error: resendErr } = await supabase.auth.resend({
-        type: 'signup',
-        email: pendingVerifyEmail,
-        options: {
-          emailRedirectTo: window.location.origin,
-        },
-      });
-      if (resendErr) {
-        setError(resendErr.message);
-      } else {
-        setInfoMessage('Verification email sent again. Check your inbox and spam folder.');
-      }
-    } finally {
-      setResending(false);
     }
   };
 
@@ -193,17 +197,10 @@ export const AuthView: React.FC<AuthViewProps> = ({
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[#0A0A0A]">
-            {mode === 'verify'
-              ? 'Verify your email'
-              : mode === 'signin'
-              ? 'Sign in to StartOrigin'
-              : 'Create your account'}
+            {mode === 'signin' ? 'Sign in to StartOrigin' : 'Create your account'}
           </h1>
           <p className="text-xs text-[#737373] mt-1.5">
-            {subtitle ||
-              (mode === 'verify'
-                ? 'One final step to activate your account.'
-                : 'Store your archive and share public frames.')}
+            {subtitle || 'Store your archive and share public frames.'}
           </p>
         </div>
 
@@ -219,40 +216,40 @@ export const AuthView: React.FC<AuthViewProps> = ({
         )}
       </div>
 
-      {mode !== 'verify' && (
-        <div className="grid grid-cols-2 gap-1 p-1 bg-[#F5F5F7] rounded-xl mb-6">
-          <button
-            type="button"
-            onClick={() => {
-              setMode('signin');
-              setError(null);
-              setInfoMessage(null);
-            }}
-            className={`min-h-[38px] rounded-lg text-xs font-medium transition-all ${
-              mode === 'signin'
-                ? 'bg-white text-[#0A0A0A] shadow-xs'
-                : 'text-[#737373] hover:text-[#0A0A0A]'
-            }`}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMode('signup');
-              setError(null);
-              setInfoMessage(null);
-            }}
-            className={`min-h-[38px] rounded-lg text-xs font-medium transition-all ${
-              mode === 'signup'
-                ? 'bg-white text-[#0A0A0A] shadow-xs'
-                : 'text-[#737373] hover:text-[#0A0A0A]'
-            }`}
-          >
-            Sign Up
-          </button>
-        </div>
-      )}
+      <div className="grid grid-cols-2 gap-1 p-1 bg-[#F5F5F7] rounded-xl mb-6">
+        <button
+          type="button"
+          onClick={() => {
+            setMode('signin');
+            setError(null);
+            setInfoMessage(null);
+            resetCaptcha();
+          }}
+          className={`min-h-[38px] rounded-lg text-xs font-medium transition-all ${
+            mode === 'signin'
+              ? 'bg-white text-[#0A0A0A] shadow-xs'
+              : 'text-[#737373] hover:text-[#0A0A0A]'
+          }`}
+        >
+          Sign In
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setMode('signup');
+            setError(null);
+            setInfoMessage(null);
+            resetCaptcha();
+          }}
+          className={`min-h-[38px] rounded-lg text-xs font-medium transition-all ${
+            mode === 'signup'
+              ? 'bg-white text-[#0A0A0A] shadow-xs'
+              : 'text-[#737373] hover:text-[#0A0A0A]'
+          }`}
+        >
+          Sign Up
+        </button>
+      </div>
 
       {error && (
         <div className="mb-4 p-3.5 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-700">
@@ -267,48 +264,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
         </div>
       )}
 
-      {mode === 'verify' ? (
-        <div className="space-y-5">
-          <div className="p-5 rounded-2xl bg-[#F5F5F7] border border-black/[0.06] text-center space-y-3">
-            <div className="w-11 h-11 rounded-full bg-white border border-black/[0.08] flex items-center justify-center mx-auto">
-              <Mail className="w-5 h-5 text-[#0A0A0A]" strokeWidth={1.75} />
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-[#0A0A0A]">
-                Verification link sent
-              </p>
-              <p className="text-xs text-[#525252] break-all">
-                {pendingVerifyEmail}
-              </p>
-            </div>
-            <p className="text-xs text-[#737373] leading-relaxed">
-              Open your inbox and click the confirmation link. Once verified, you can sign in with either your username or email.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleResendVerification}
-            disabled={resending}
-            className="w-full min-h-[44px] px-4 py-2.5 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${resending ? 'animate-spin' : ''}`} />
-            <span>{resending ? 'Sending...' : 'Resend verification email'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setMode('signin');
-              setError(null);
-            }}
-            className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium flex items-center justify-center gap-2 hover:bg-black/85 transition-colors"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Continue to Sign In</span>
-          </button>
-        </div>
-      ) : mode === 'signin' ? (
+      {mode === 'signin' ? (
         <form onSubmit={handleSignIn} className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
@@ -337,6 +293,20 @@ export const AuthView: React.FC<AuthViewProps> = ({
               className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
             />
           </div>
+
+          <SwipeCaptcha
+            verified={captchaVerified}
+            attention={captchaAttention}
+            onChange={(ok) => {
+              setCaptchaVerified(ok);
+              if (ok) {
+                setCaptchaAttention(false);
+                if (error === 'Please swipe to verify you are not a robot.') {
+                  setError(null);
+                }
+              }
+            }}
+          />
 
           <button
             type="submit"
@@ -406,6 +376,20 @@ export const AuthView: React.FC<AuthViewProps> = ({
               className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm transition-colors"
             />
           </div>
+
+          <SwipeCaptcha
+            verified={captchaVerified}
+            attention={captchaAttention}
+            onChange={(ok) => {
+              setCaptchaVerified(ok);
+              if (ok) {
+                setCaptchaAttention(false);
+                if (error === 'Please swipe to verify you are not a robot.') {
+                  setError(null);
+                }
+              }
+            }}
+          />
 
           <button
             type="submit"
