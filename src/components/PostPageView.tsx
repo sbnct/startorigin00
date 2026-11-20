@@ -533,7 +533,16 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
               <div key={item.id} className="group flex flex-col">
                 <button
                   type="button"
-                  onClick={() => onOpenPost(item.id)}
+                  onClick={() =>
+                    onOpenCinema({
+                      id: item.id,
+                      title: item.title,
+                      image_url: item.image_url,
+                      subtitle: item.profiles
+                        ? `${item.profiles.name} · @${item.profiles.username}`
+                        : undefined,
+                    })
+                  }
                   className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
                 >
                   <ResilientImage
@@ -549,7 +558,7 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
                     onClick={() => onOpenPost(item.id)}
                     className="text-left min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-black rounded-lg"
                   >
-                    <p className="text-xs font-medium text-[#0A0A0A] truncate">
+                    <p className="text-xs font-medium text-[#0A0A0A] truncate hover:underline">
                       {item.title}
                     </p>
                     {item.profiles && (

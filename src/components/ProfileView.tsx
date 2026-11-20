@@ -14,6 +14,7 @@ import {
 import { supabase } from '../lib/supabase';
 import {
   ActivityLog,
+  CinemaPhoto,
   Collection,
   Photo,
   Profile,
@@ -40,6 +41,7 @@ interface ProfileViewProps {
   showBackButton?: boolean;
   onBack?: () => void;
   onAuthSuccess: () => void;
+  onOpenCinema: (photo: CinemaPhoto, collectionItems?: CinemaPhoto[]) => void;
   onOpenPost: (photoId: string) => void;
   onOpenCollection: (collectionId: string) => void;
   onProfileUpdated: () => void;
@@ -55,6 +57,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   showBackButton = false,
   onBack,
   onAuthSuccess,
+  onOpenCinema,
   onOpenPost,
   onOpenCollection,
   onProfileUpdated,
@@ -602,7 +605,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </button>
       </div>
 
-      {/* Tab 1: Public Photos Grid (Clicking opens Post Page) */}
+      {/* Tab 1: Public Photos Grid (Photo -> Cinema, Name -> Post Page) */}
       {activeTab === 'photos' && (
         <div>
           {publicPhotos.length === 0 ? (
@@ -612,13 +615,20 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
-              {publicPhotos.map((photo) => (
-                <div key={photo.id} className="group flex flex-col">
-                  <button
-                    type="button"
-                    onClick={() => onOpenPost(photo.id)}
-                    className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
-                  >
+              {(() => {
+                const cinemaList: CinemaPhoto[] = publicPhotos.map((p) => ({
+                  id: p.id,
+                  title: p.title,
+                  image_url: p.image_url,
+                  subtitle: `${profile.name} · @${profile.username}`,
+                }));
+                return publicPhotos.map((photo, idx) => (
+                  <div key={photo.id} className="group flex flex-col">
+                    <button
+                      type="button"
+                      onClick={() => onOpenCinema(cinemaList[idx], cinemaList)}
+                      className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
+                    >
                     <ResilientImage
                       src={photo.image_url}
                       alt={photo.title}
@@ -632,7 +642,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       onClick={() => onOpenPost(photo.id)}
                       className="text-left min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-black rounded-lg"
                     >
-                      <p className="text-xs font-medium text-[#0A0A0A] truncate">
+                      <p className="text-xs font-medium text-[#0A0A0A] truncate hover:underline">
                         {photo.title}
                       </p>
                       <p className="text-[11px] text-[#737373] tabular-nums">
@@ -648,7 +658,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     />
                   </div>
                 </div>
-              ))}
+                ));
+              })()}
             </div>
           )}
         </div>
@@ -756,16 +767,28 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
-              {savedPhotos.map((item) => {
-                const photo = item.photos;
-                if (!photo) return null;
-                return (
-                  <div key={item.id} className="group flex flex-col">
-                    <button
-                      type="button"
-                      onClick={() => onOpenPost(photo.id)}
-                      className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
-                    >
+              {(() => {
+                const validSaved = savedPhotos.filter((it) => Boolean(it.photos));
+                const savedCinemaList: CinemaPhoto[] = validSaved.map((it) => {
+                  const p = it.photos!;
+                  return {
+                    id: p.id,
+                    title: p.title,
+                    image_url: p.image_url,
+                    subtitle: p.profiles
+                      ? `${p.profiles.name} · @${p.profiles.username}`
+                      : undefined,
+                  };
+                });
+                return validSaved.map((item, idx) => {
+                  const photo = item.photos!;
+                  return (
+                    <div key={item.id} className="group flex flex-col">
+                      <button
+                        type="button"
+                        onClick={() => onOpenCinema(savedCinemaList[idx], savedCinemaList)}
+                        className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
+                      >
                       <ResilientImage
                         src={photo.image_url}
                         alt={photo.title}
@@ -779,7 +802,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         onClick={() => onOpenPost(photo.id)}
                         className="text-left min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-black rounded-lg"
                       >
-                        <p className="text-xs font-medium text-[#0A0A0A] truncate">
+                        <p className="text-xs font-medium text-[#0A0A0A] truncate hover:underline">
                           {photo.title}
                         </p>
                         <p className="text-[11px] text-[#737373] truncate tabular-nums">
@@ -796,8 +819,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       />
                     </div>
                   </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
           )}
         </div>

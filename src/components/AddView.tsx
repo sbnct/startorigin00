@@ -24,6 +24,7 @@ interface AddViewProps {
   onAuthSuccess: () => void;
   onNavigateGallery: () => void;
   onDataChanged: () => void;
+  onShowToast?: (msg: string) => void;
 }
 
 interface PendingPhotoItem {
@@ -41,6 +42,7 @@ export const AddView: React.FC<AddViewProps> = ({
   onAuthSuccess,
   onNavigateGallery,
   onDataChanged,
+  onShowToast,
 }) => {
   const [mode, setMode] = useState<'choose' | 'photo' | 'collection'>('choose');
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -255,11 +257,9 @@ export const AddView: React.FC<AddViewProps> = ({
           : 'to Unsorted'
         : 'to your Gallery';
 
-      setConfirmationMessage(
-        `${uploadedRows.length} ${
-          uploadedRows.length === 1 ? 'photo' : 'photos'
-        } uploaded successfully ${destinationLabel}.`
-      );
+      const successMsg = `${uploadedRows.length} ${
+        uploadedRows.length === 1 ? 'photo' : 'photos'
+      } uploaded ${destinationLabel}.`;
 
       // Clear pending items
       items.forEach((it) => URL.revokeObjectURL(it.previewUrl));
@@ -268,6 +268,8 @@ export const AddView: React.FC<AddViewProps> = ({
       setUnifiedTags('');
       setFileLimitNotice(null);
       onDataChanged();
+      onShowToast?.(successMsg);
+      onNavigateGallery();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed.');
     } finally {
@@ -334,13 +336,11 @@ export const AddView: React.FC<AddViewProps> = ({
         // Non-fatal
       }
 
-      if (created?.id) {
-        setCreatedCollection({ id: created.id, privacy: collectionPrivacy });
-      }
-      setConfirmationMessage(`Collection "${trimmed}" was created successfully.`);
       setCollectionName('');
       setCollectionPrivacy('public');
       onDataChanged();
+      onShowToast?.(`Collection "${trimmed}" created.`);
+      onNavigateGallery();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create collection.');
     } finally {

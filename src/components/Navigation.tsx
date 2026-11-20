@@ -17,6 +17,7 @@ import { PWAInstallButton } from './PWAInstallButton';
 interface NavigationProps {
   activeTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
+  onBrandClick?: () => void;
   currentUserProfile: Profile | null;
   isAuthenticated: boolean;
   onOpenAuth: () => void;
@@ -38,6 +39,7 @@ const NAV_ITEMS: {
 export const Navigation: React.FC<NavigationProps> = ({
   activeTab,
   onSelectTab,
+  onBrandClick,
   currentUserProfile,
   isAuthenticated,
   onOpenAuth,
@@ -68,7 +70,7 @@ export const Navigation: React.FC<NavigationProps> = ({
             <div className="flex items-center justify-between gap-2 px-2 mb-8">
               <button
                 type="button"
-                onClick={() => onSelectTab('feed')}
+                onClick={() => (onBrandClick ? onBrandClick() : onSelectTab('feed'))}
                 className="text-left py-1 focus-visible:outline-2 focus-visible:outline-black rounded-lg"
               >
                 <span className="text-xl font-semibold tracking-tight text-[#0A0A0A] whitespace-nowrap">

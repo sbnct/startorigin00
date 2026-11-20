@@ -6,6 +6,7 @@ import {
   Globe,
   Link2,
   Lock,
+  Plus,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import {
@@ -26,6 +27,7 @@ import { fetchPhotoLikesMap, togglePhotoLike } from '../lib/likes';
 import { LikeButton } from './LikeButton';
 import { ResilientImage } from './ResilientImage';
 import { VerifiedBadge } from './VerifiedBadge';
+import { AddPhotoModal } from './AddPhotoModal';
 
 interface CollectionWithAuthor extends Collection {
   profiles?: Pick<Profile, 'id' | 'name' | 'username' | 'avatar_url' | 'is_verified'> | null;
@@ -36,7 +38,7 @@ interface CollectionViewProps {
   currentUserId: string | null;
   onBack: () => void;
   onOpenPost: (photoId: string) => void;
-  onOpenCinema?: (photo: CinemaPhoto) => void;
+  onOpenCinema: (photo: CinemaPhoto, collectionItems?: CinemaPhoto[]) => void;
   onOpenProfile: (userId: string) => void;
   onRequireAuth: () => void;
   onShowToast?: (msg: string) => void;
@@ -47,6 +49,7 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
   currentUserId,
   onBack,
   onOpenPost,
+  onOpenCinema,
   onOpenProfile,
   onRequireAuth,
   onShowToast,
@@ -58,6 +61,8 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
   const [likeBusyIds, setLikeBusyIds] = useState<Set<string>>(new Set());
   const [copiedLink, setCopiedLink] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [ownerCollections, setOwnerCollections] = useState<Collection[]>([]);
 
   const loadCollection = useCallback(async () => {
     setLoading(true);
@@ -109,6 +114,17 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
 
       const { data: photoRows } = await query;
       setPhotos((photoRows as PhotoWithAuthor[]) || []);
+
+      if (currentUserId && typedCol.user_id === currentUserId) {
+        const { data: myCols } = await supabase
+          .from('collections')
+          .select('*')
+          .eq('user_id', currentUserId)
+          .order('updated_at', { ascending: false });
+        setOwnerCollections((myCols as Collection[]) || [typedCol]);
+      } else {
+        setOwnerCollections([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -239,23 +255,36 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
           <span>Go Back</span>
         </button>
 
-        <button
-          type="button"
-          onClick={handleCopyCollectionLink}
-          className="min-h-[44px] px-4 py-2 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-2 transition-colors"
-        >
-          {copiedLink ? (
-            <>
-              <Check className="w-3.5 h-3.5" strokeWidth={2} />
-              <span>Link Copied</span>
-            </>
-          ) : (
-            <>
-              <Link2 className="w-3.5 h-3.5" strokeWidth={1.75} />
-              <span>Copy Link</span>
-            </>
+        <div className="flex items-center gap-2">
+          {currentUserId && collection.user_id === currentUserId && (
+            <button
+              type="button"
+              onClick={() => setAddModalOpen(true)}
+              className="min-h-[44px] px-4 py-2 rounded-xl bg-[#0A0A0A] hover:bg-black/85 text-xs font-medium text-white inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+            >
+              <Plus className="w-3.5 h-3.5" strokeWidth={2} />
+              <span>Add Photo</span>
+            </button>
           )}
-        </button>
+
+          <button
+            type="button"
+            onClick={handleCopyCollectionLink}
+            className="min-h-[44px] px-4 py-2 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-2 transition-colors whitespace-nowrap"
+          >
+            {copiedLink ? (
+              <>
+                <Check className="w-3.5 h-3.5" strokeWidth={2} />
+                <span>Link Copied</span>
+              </>
+            ) : (
+              <>
+                <Link2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>Copy Link</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Collection Header */}
@@ -319,44 +348,71 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-          {photos.map((photo) => (
-            <div key={photo.id} className="group flex flex-col">
-              <button
-                type="button"
-                onClick={() => onOpenPost(photo.id)}
-                className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
-              >
-                <ResilientImage
-                  src={photo.image_url}
-                  alt={photo.title}
-                  containerClassName="aspect-square rounded-2xl border border-black/[0.06]"
-                  className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
-                />
-              </button>
-              <div className="flex items-start justify-between gap-2 mt-2">
+          {(() => {
+            const cinemaList: CinemaPhoto[] = photos.map((p) => ({
+              id: p.id,
+              title: p.title,
+              image_url: p.image_url,
+              subtitle: p.profiles
+                ? `${p.profiles.name} · @${p.profiles.username}`
+                : collection.name,
+            }));
+
+            return photos.map((photo, idx) => (
+              <div key={photo.id} className="group flex flex-col">
                 <button
                   type="button"
-                  onClick={() => onOpenPost(photo.id)}
-                  className="text-left min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-black rounded-lg"
+                  onClick={() => onOpenCinema(cinemaList[idx], cinemaList)}
+                  className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
                 >
-                  <p className="text-xs font-medium text-[#0A0A0A] truncate">
-                    {photo.title}
-                  </p>
-                  <p className="text-[11px] text-[#737373] tabular-nums">
-                    {formatDate(photo.photo_date || photo.created_at)}
-                  </p>
+                  <ResilientImage
+                    src={photo.image_url}
+                    alt={photo.title}
+                    containerClassName="aspect-square rounded-2xl border border-black/[0.06]"
+                    className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+                  />
                 </button>
-                <LikeButton
-                  compact
-                  liked={likedIds.has(photo.id)}
-                  count={likeCounts[photo.id] || 0}
-                  busy={likeBusyIds.has(photo.id)}
-                  onToggle={() => handleToggleLike(photo)}
-                />
+                <div className="flex items-start justify-between gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => onOpenPost(photo.id)}
+                    className="text-left min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-black rounded-lg"
+                  >
+                    <p className="text-xs font-medium text-[#0A0A0A] truncate hover:underline">
+                      {photo.title}
+                    </p>
+                    <p className="text-[11px] text-[#737373] tabular-nums">
+                      {formatDate(photo.photo_date || photo.created_at)}
+                    </p>
+                  </button>
+                  <LikeButton
+                    compact
+                    liked={likedIds.has(photo.id)}
+                    count={likeCounts[photo.id] || 0}
+                    busy={likeBusyIds.has(photo.id)}
+                    onToggle={() => handleToggleLike(photo)}
+                  />
+                </div>
               </div>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
+      )}
+
+      {currentUserId && collection.user_id === currentUserId && (
+        <AddPhotoModal
+          isOpen={addModalOpen}
+          currentUserId={currentUserId}
+          collections={ownerCollections.length > 0 ? ownerCollections : [collection]}
+          defaultCollectionId={collection.id}
+          onClose={() => setAddModalOpen(false)}
+          onSuccess={(count, destinationLabel) => {
+            loadCollection();
+            onShowToast?.(
+              `${count} ${count === 1 ? 'photo' : 'photos'} uploaded ${destinationLabel}.`
+            );
+          }}
+        />
       )}
     </div>
   );

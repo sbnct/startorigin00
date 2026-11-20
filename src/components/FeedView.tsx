@@ -16,7 +16,7 @@ import { fetchPhotoLikesMap, togglePhotoLike } from '../lib/likes';
 
 interface FeedViewProps {
   currentUserId: string | null;
-  onOpenCinema: (photo: CinemaPhoto) => void;
+  onOpenCinema: (photo: CinemaPhoto, collectionItems?: CinemaPhoto[]) => void;
   onOpenPost: (photoId: string) => void;
   onOpenProfile: (userId: string) => void;
   onOpenProfileByUsername: (username: string) => void;
@@ -297,26 +297,26 @@ export const FeedView: React.FC<FeedViewProps> = ({
         )}
 
       <div className="space-y-10">
-        {photos.map((photo) => {
-          const author = photo.profiles;
-          return (
-            <article
-              key={photo.id}
-              className="pb-8 border-b border-black/[0.08] last:border-b-0"
-            >
-              {/* Photo — clicking opens Cinema view */}
-              <button
-                type="button"
-                onClick={() =>
-                  onOpenCinema({
-                    id: photo.id,
-                    title: photo.title,
-                    image_url: photo.image_url,
-                    subtitle: author ? `${author.name} · @${author.username}` : undefined,
-                  })
-                }
-                className="block w-full text-left group rounded-2xl overflow-hidden focus-visible:outline-2 focus-visible:outline-black"
+        {(() => {
+          const cinemaList: CinemaPhoto[] = photos.map((p) => ({
+            id: p.id,
+            title: p.title,
+            image_url: p.image_url,
+            subtitle: p.profiles ? `${p.profiles.name} · @${p.profiles.username}` : undefined,
+          }));
+          return photos.map((photo, idx) => {
+            const author = photo.profiles;
+            return (
+              <article
+                key={photo.id}
+                className="pb-8 border-b border-black/[0.08] last:border-b-0"
               >
+                {/* Photo — clicking opens Cinema view */}
+                <button
+                  type="button"
+                  onClick={() => onOpenCinema(cinemaList[idx], cinemaList)}
+                  className="block w-full text-left group rounded-2xl overflow-hidden focus-visible:outline-2 focus-visible:outline-black"
+                >
                 <ResilientImage
                   src={photo.image_url}
                   alt={photo.title}
@@ -416,9 +416,10 @@ export const FeedView: React.FC<FeedViewProps> = ({
                   </span>
                 </div>
               </div>
-            </article>
-          );
-        })}
+              </article>
+            );
+          });
+        })()}
       </div>
     </div>
   );

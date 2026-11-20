@@ -10,6 +10,7 @@ import {
   Lock,
   MoreHorizontal,
   Pencil,
+  Plus,
   Search,
   Trash2,
   X,
@@ -32,11 +33,13 @@ import {
 } from '../lib/utils';
 import { AuthView } from './AuthView';
 import { ResilientImage } from './ResilientImage';
+import { AddPhotoModal } from './AddPhotoModal';
 
 interface GalleryViewProps {
   currentUserId: string | null;
   onAuthSuccess: () => void;
-  onOpenCinema: (photo: CinemaPhoto) => void;
+  onOpenCinema: (photo: CinemaPhoto, collectionItems?: CinemaPhoto[]) => void;
+  onOpenPost: (photoId: string) => void;
   onDataChanged: () => void;
   onShowToast?: (msg: string) => void;
   refreshKey: number;
@@ -46,6 +49,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   currentUserId,
   onAuthSuccess,
   onOpenCinema,
+  onOpenPost,
   onDataChanged,
   onShowToast,
   refreshKey,
@@ -77,6 +81,10 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
 
   const [modalError, setModalError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const [addModalState, setAddModalState] = useState<{
+    open: boolean;
+    collectionId: string;
+  }>({ open: false, collectionId: '' });
 
   const loadGallery = useCallback(async () => {
     if (!currentUserId) return;
@@ -343,7 +351,16 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
     return <Globe className="w-3 h-3" strokeWidth={1.75} />;
   };
 
-  const renderPhotoCard = (photo: Photo) => {
+  const toCinemaPhoto = (photo: Photo): CinemaPhoto => ({
+    id: photo.id,
+    title: photo.title,
+    image_url: photo.image_url,
+    subtitle: `${getVisibilityLabel(photo.privacy)} · ${formatDate(
+      photo.photo_date || photo.created_at
+    )}`,
+  });
+
+  const renderPhotoCard = (photo: Photo, swipeList?: Photo[]) => {
     const isMenuOpen = menuOpenId === photo.id;
     return (
       <div key={photo.id} className="group relative">
@@ -351,14 +368,10 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
         <button
           type="button"
           onClick={() =>
-            onOpenCinema({
-              id: photo.id,
-              title: photo.title,
-              image_url: photo.image_url,
-              subtitle: `${getVisibilityLabel(photo.privacy)} · ${formatDate(
-                photo.photo_date || photo.created_at
-              )}`,
-            })
+            onOpenCinema(
+              toCinemaPhoto(photo),
+              swipeList ? swipeList.map(toCinemaPhoto) : undefined
+            )
           }
           className="block w-full text-left rounded-2xl overflow-hidden focus-visible:outline-2 focus-visible:outline-black"
         >
@@ -451,9 +464,17 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
           </div>
         )}
 
-        {/* Clean unboxed metadata */}
+        {/* Clean unboxed metadata (clicking name opens Post Page) */}
         <div className="mt-2 px-0.5">
-          <p className="text-xs font-medium text-[#0A0A0A] truncate">{photo.title}</p>
+          <button
+            type="button"
+            onClick={() => onOpenPost(photo.id)}
+            className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded"
+          >
+            <p className="text-xs font-medium text-[#0A0A0A] truncate hover:underline">
+              {photo.title}
+            </p>
+          </button>
           <p className="text-[11px] text-[#737373] truncate tabular-nums">
             {getVisibilityLabel(photo.privacy)} ·{' '}
             {formatDate(photo.photo_date || photo.created_at)}
@@ -480,6 +501,17 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               </button>
 
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAddModalState({ open: true, collectionId: activeCollection.id })
+                  }
+                  className="min-h-[40px] px-3.5 py-2 rounded-xl bg-[#0A0A0A] hover:bg-black/85 text-xs font-medium text-white inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                >
+                  <Plus className="w-3.5 h-3.5" strokeWidth={2} />
+                  <span>Add Photo</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => handleCopyCollectionLink(activeCollection)}
@@ -605,7 +637,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            {collectionPhotos.map(renderPhotoCard)}
+            {collectionPhotos.map((photo) => renderPhotoCard(photo, collectionPhotos))}
           </div>
         )
       ) : (
@@ -613,12 +645,23 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
         <div className="space-y-12">
           {/* 1. Unsorted Photos */}
           <section>
-            <div className="flex items-baseline justify-between mb-4">
-              <h2 className="text-base font-semibold text-[#0A0A0A]">Unsorted Photos</h2>
-              <span className="text-xs text-[#737373] tabular-nums">
-                {unsortedPhotos.length}{' '}
-                {unsortedPhotos.length === 1 ? 'photo' : 'photos'}
-              </span>
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div className="flex items-baseline gap-2.5 min-w-0">
+                <h2 className="text-base font-semibold text-[#0A0A0A]">Unsorted Photos</h2>
+                <span className="text-xs text-[#737373] tabular-nums">
+                  {unsortedPhotos.length}{' '}
+                  {unsortedPhotos.length === 1 ? 'photo' : 'photos'}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setAddModalState({ open: true, collectionId: '' })}
+                className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#0A0A0A] hover:bg-black/85 text-white text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" strokeWidth={2} />
+                <span>Add Photo</span>
+              </button>
             </div>
 
             {unsortedPhotos.length === 0 ? (
@@ -631,7 +674,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                {unsortedPhotos.map(renderPhotoCard)}
+                {unsortedPhotos.map((photo) => renderPhotoCard(photo, unsortedPhotos))}
               </div>
             )}
           </section>
@@ -745,24 +788,37 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                         </div>
                       )}
 
-                      <button
-                        type="button"
-                        onClick={() => setSelectedCollectionId(col.id)}
-                        className="w-full flex items-baseline justify-between gap-2 px-1 text-left"
-                      >
-                        <div className="min-w-0">
+                      <div className="flex items-center justify-between gap-2 px-1">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCollectionId(col.id)}
+                          className="min-w-0 flex-1 text-left"
+                        >
                           <h3 className="text-sm font-semibold text-[#0A0A0A] truncate">
                             {col.name}
                           </h3>
-                          <p className="text-[11px] text-[#737373] inline-flex items-center gap-1 mt-0.5">
+                          <p className="text-[11px] text-[#737373] inline-flex items-center gap-1.5 mt-0.5 tabular-nums">
                             {renderPrivacyIcon(colPrivacy)}
                             <span>{getVisibilityLabel(colPrivacy)}</span>
+                            <span aria-hidden="true">·</span>
+                            <span>
+                              {colPhotos.length} {colPhotos.length === 1 ? 'photo' : 'photos'}
+                            </span>
                           </p>
-                        </div>
-                        <span className="text-xs text-[#737373] tabular-nums shrink-0">
-                          {colPhotos.length} {colPhotos.length === 1 ? 'photo' : 'photos'}
-                        </span>
-                      </button>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAddModalState({ open: true, collectionId: col.id });
+                          }}
+                          className="min-h-[36px] px-3 py-1.5 rounded-xl bg-white border border-black/[0.1] hover:bg-[#0A0A0A] hover:text-white hover:border-[#0A0A0A] text-[#0A0A0A] text-xs font-medium inline-flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0"
+                        >
+                          <Plus className="w-3.5 h-3.5" strokeWidth={2} />
+                          <span>Add Photo</span>
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1057,6 +1113,24 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             </div>
           </form>
         </div>
+      )}
+
+      {/* Add Photo to Unsorted or Collection Modal */}
+      {currentUserId && (
+        <AddPhotoModal
+          isOpen={addModalState.open}
+          currentUserId={currentUserId}
+          collections={collections}
+          defaultCollectionId={addModalState.collectionId}
+          onClose={() => setAddModalState((prev) => ({ ...prev, open: false }))}
+          onSuccess={(count, destinationLabel) => {
+            loadGallery();
+            onDataChanged();
+            onShowToast?.(
+              `${count} ${count === 1 ? 'photo' : 'photos'} uploaded ${destinationLabel}.`
+            );
+          }}
+        />
       )}
     </div>
   );

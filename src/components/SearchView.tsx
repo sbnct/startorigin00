@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Search as SearchIcon, User as UserIcon, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import { PhotoWithAuthor, Profile } from '../types';
+import { CinemaPhoto, PhotoWithAuthor, Profile } from '../types';
 import { formatDate, getInitials } from '../lib/utils';
 import { ResilientImage } from './ResilientImage';
 import { VerifiedBadge } from './VerifiedBadge';
@@ -10,6 +10,7 @@ import { fetchPhotoLikesMap, togglePhotoLike } from '../lib/likes';
 
 interface SearchViewProps {
   currentUserId: string | null;
+  onOpenCinema: (photo: CinemaPhoto) => void;
   onOpenPost: (photoId: string) => void;
   onOpenProfile: (userId: string) => void;
   onRequireAuth: () => void;
@@ -17,6 +18,7 @@ interface SearchViewProps {
 
 export const SearchView: React.FC<SearchViewProps> = ({
   currentUserId,
+  onOpenCinema,
   onOpenPost,
   onOpenProfile,
   onRequireAuth,
@@ -274,7 +276,16 @@ export const SearchView: React.FC<SearchViewProps> = ({
                 <div key={photo.id} className="group flex flex-col">
                   <button
                     type="button"
-                    onClick={() => onOpenPost(photo.id)}
+                    onClick={() =>
+                      onOpenCinema({
+                        id: photo.id,
+                        title: photo.title,
+                        image_url: photo.image_url,
+                        subtitle: photo.profiles
+                          ? `${photo.profiles.name} · @${photo.profiles.username}`
+                          : undefined,
+                      })
+                    }
                     className="block w-full text-left focus-visible:outline-2 focus-visible:outline-black rounded-2xl"
                   >
                     <ResilientImage
@@ -290,7 +301,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                       onClick={() => onOpenPost(photo.id)}
                       className="text-left min-w-0 flex-1 focus-visible:outline-2 focus-visible:outline-black rounded-lg"
                     >
-                      <p className="text-xs font-medium text-[#0A0A0A] truncate">
+                      <p className="text-xs font-medium text-[#0A0A0A] truncate hover:underline">
                         {photo.title}
                       </p>
                       <p className="text-[11px] text-[#737373] truncate tabular-nums">

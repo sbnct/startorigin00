@@ -6,6 +6,7 @@ interface AuthViewProps {
   onSuccess: () => void;
   onClose?: () => void;
   embedded?: boolean;
+  initialMode?: 'signin' | 'signup';
   subtitle?: string;
 }
 
@@ -13,9 +14,10 @@ export const AuthView: React.FC<AuthViewProps> = ({
   onSuccess,
   onClose,
   embedded = false,
+  initialMode = 'signin',
   subtitle,
 }) => {
-  const [mode, setMode] = useState<'signin' | 'signup' | 'verify'>('signin');
+  const [mode, setMode] = useState<'signin' | 'signup' | 'verify'>(initialMode);
   const [identifier, setIdentifier] = useState('');
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');

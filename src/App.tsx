@@ -14,6 +14,7 @@ import { CinemaModal } from './components/CinemaModal';
 import { AuthView } from './components/AuthView';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { AdminView } from './components/AdminView';
+import { LandingView } from './components/LandingView';
 
 interface RouteEntry {
   tab: NavTab;
@@ -22,9 +23,20 @@ interface RouteEntry {
   profileUserId?: string;
 }
 
+interface CinemaState {
+  items: CinemaPhoto[];
+  index: number;
+}
+
 function isAdminPath(): boolean {
   if (typeof window === 'undefined') return false;
   return window.location.pathname.replace(/\/+$/, '') === '/admin';
+}
+
+function hasDeepLinkParam(): boolean {
+  if (typeof window === 'undefined') return false;
+  const params = new URLSearchParams(window.location.search);
+  return Boolean(params.get('photo') || params.get('collection'));
 }
 
 function getInitialRouteStack(): RouteEntry[] {
@@ -57,10 +69,13 @@ function syncUrlForRoute(entry: RouteEntry) {
 export default function App() {
   const [isAdminRoute, setIsAdminRoute] = useState<boolean>(isAdminPath);
   const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [browseAsGuest, setBrowseAsGuest] = useState<boolean>(hasDeepLinkParam);
   const [currentUserProfile, setCurrentUserProfile] = useState<Profile | null>(null);
   const [routeStack, setRouteStack] = useState<RouteEntry[]>(getInitialRouteStack);
-  const [cinemaPhoto, setCinemaPhoto] = useState<CinemaPhoto | null>(null);
+  const [cinemaState, setCinemaState] = useState<CinemaState | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authInitialMode, setAuthInitialMode] = useState<'signin' | 'signup'>('signin');
   const [refreshKey, setRefreshKey] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -133,6 +148,7 @@ export default function App() {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       loadCurrentProfile(data.session);
+      setAuthReady(true);
     });
 
     const {
@@ -140,10 +156,31 @@ export default function App() {
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       loadCurrentProfile(nextSession);
+      setAuthReady(true);
     });
 
     return () => subscription.unsubscribe();
   }, [loadCurrentProfile]);
+
+  const openCinema = useCallback(
+    (photo: CinemaPhoto, collectionItems?: CinemaPhoto[]) => {
+      if (collectionItems && collectionItems.length > 0) {
+        const idx = collectionItems.findIndex((it) => it.id === photo.id);
+        setCinemaState({
+          items: collectionItems,
+          index: idx >= 0 ? idx : 0,
+        });
+      } else {
+        setCinemaState({ items: [photo], index: 0 });
+      }
+    },
+    []
+  );
+
+  const openAuth = useCallback((initialMode: 'signin' | 'signup' = 'signin') => {
+    setAuthInitialMode(initialMode);
+    setAuthModalOpen(true);
+  }, []);
 
   const handleSelectTab = (tab: NavTab) => {
     setRouteStack([{ tab }]);
@@ -199,6 +236,7 @@ export default function App() {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     setCurrentUserProfile(null);
+    setBrowseAsGuest(false);
     setRouteStack([{ tab: 'feed' }]);
     setRefreshKey((k) => k + 1);
   };
@@ -214,9 +252,57 @@ export default function App() {
   if (isAdminRoute) {
     return (
       <>
-        <AdminView onExitAdmin={handleExitAdmin} onOpenCinema={setCinemaPhoto} />
-        <CinemaModal photo={cinemaPhoto} onClose={() => setCinemaPhoto(null)} />
+        <AdminView onExitAdmin={handleExitAdmin} onOpenCinema={openCinema} />
+        <CinemaModal
+          items={cinemaState?.items || []}
+          initialIndex={cinemaState?.index || 0}
+          onClose={() => setCinemaState(null)}
+        />
         <OfflineIndicator />
+      </>
+    );
+  }
+
+  if (!authReady) {
+    return <div className="min-h-screen bg-white" />;
+  }
+
+  const showLanding =
+    !session?.user &&
+    !browseAsGuest &&
+    !currentRoute.postId &&
+    !currentRoute.collectionId;
+
+  if (showLanding) {
+    return (
+      <>
+        <LandingView
+          onGetStarted={() => openAuth('signup')}
+          onSignIn={() => openAuth('signin')}
+          onExploreFeed={() => {
+            setBrowseAsGuest(true);
+            handleSelectTab('feed');
+          }}
+        />
+        {authModalOpen && (
+          <AuthView
+            initialMode={authInitialMode}
+            onSuccess={() => {
+              setAuthModalOpen(false);
+              bumpRefresh();
+            }}
+            onClose={() => setAuthModalOpen(false)}
+          />
+        )}
+        <OfflineIndicator />
+        {toastMessage && (
+          <div
+            role="status"
+            className="fixed bottom-6 right-4 sm:right-6 z-50 px-4 py-3 rounded-2xl bg-[#0A0A0A] text-white text-xs font-medium shadow-xl"
+          >
+            {toastMessage}
+          </div>
+        )}
       </>
     );
   }
@@ -228,12 +314,12 @@ export default function App() {
           photoId={currentRoute.postId}
           currentUserId={session?.user?.id || null}
           onBack={handleBack}
-          onOpenCinema={setCinemaPhoto}
+          onOpenCinema={openCinema}
           onOpenPost={handleOpenPost}
           onOpenCollection={handleOpenCollection}
           onOpenProfile={handleOpenProfile}
           onOpenProfileByUsername={handleOpenProfileByUsername}
-          onRequireAuth={() => setAuthModalOpen(true)}
+          onRequireAuth={() => openAuth('signin')}
           onShowToast={showToast}
         />
       );
@@ -246,9 +332,9 @@ export default function App() {
           currentUserId={session?.user?.id || null}
           onBack={handleBack}
           onOpenPost={handleOpenPost}
-          onOpenCinema={setCinemaPhoto}
+          onOpenCinema={openCinema}
           onOpenProfile={handleOpenProfile}
-          onRequireAuth={() => setAuthModalOpen(true)}
+          onRequireAuth={() => openAuth('signin')}
           onShowToast={showToast}
         />
       );
@@ -265,13 +351,14 @@ export default function App() {
             setAuthModalOpen(false);
             bumpRefresh();
           }}
+          onOpenCinema={openCinema}
           onOpenPost={handleOpenPost}
           onOpenCollection={handleOpenCollection}
           onProfileUpdated={() => {
             loadCurrentProfile(session);
             bumpRefresh();
           }}
-          onRequireAuth={() => setAuthModalOpen(true)}
+          onRequireAuth={() => openAuth('signin')}
           onSignOut={handleSignOut}
           onShowToast={showToast}
           refreshKey={refreshKey}
@@ -284,11 +371,11 @@ export default function App() {
         return (
           <FeedView
             currentUserId={session?.user?.id || null}
-            onOpenCinema={setCinemaPhoto}
+            onOpenCinema={openCinema}
             onOpenPost={handleOpenPost}
             onOpenProfile={handleOpenProfile}
             onOpenProfileByUsername={handleOpenProfileByUsername}
-            onRequireAuth={() => setAuthModalOpen(true)}
+            onRequireAuth={() => openAuth('signin')}
             onShowToast={showToast}
             refreshKey={refreshKey}
           />
@@ -297,9 +384,10 @@ export default function App() {
         return (
           <SearchView
             currentUserId={session?.user?.id || null}
+            onOpenCinema={openCinema}
             onOpenPost={handleOpenPost}
             onOpenProfile={handleOpenProfile}
-            onRequireAuth={() => setAuthModalOpen(true)}
+            onRequireAuth={() => openAuth('signin')}
           />
         );
       case 'add':
@@ -312,6 +400,7 @@ export default function App() {
             }}
             onNavigateGallery={() => handleSelectTab('gallery')}
             onDataChanged={bumpRefresh}
+            onShowToast={showToast}
           />
         );
       case 'gallery':
@@ -322,7 +411,8 @@ export default function App() {
               setAuthModalOpen(false);
               bumpRefresh();
             }}
-            onOpenCinema={setCinemaPhoto}
+            onOpenCinema={openCinema}
+            onOpenPost={handleOpenPost}
             onDataChanged={bumpRefresh}
             onShowToast={showToast}
             refreshKey={refreshKey}
@@ -337,13 +427,14 @@ export default function App() {
               setAuthModalOpen(false);
               bumpRefresh();
             }}
+            onOpenCinema={openCinema}
             onOpenPost={handleOpenPost}
             onOpenCollection={handleOpenCollection}
             onProfileUpdated={() => {
               loadCurrentProfile(session);
               bumpRefresh();
             }}
-            onRequireAuth={() => setAuthModalOpen(true)}
+            onRequireAuth={() => openAuth('signin')}
             onSignOut={handleSignOut}
             onShowToast={showToast}
             refreshKey={refreshKey}
@@ -357,18 +448,31 @@ export default function App() {
       <Navigation
         activeTab={currentRoute.tab}
         onSelectTab={handleSelectTab}
+        onBrandClick={
+          !session?.user
+            ? () => {
+                setBrowseAsGuest(false);
+                setRouteStack([{ tab: 'feed' }]);
+              }
+            : undefined
+        }
         currentUserProfile={currentUserProfile}
         isAuthenticated={Boolean(session?.user)}
-        onOpenAuth={() => setAuthModalOpen(true)}
+        onOpenAuth={() => openAuth('signin')}
         onSignOut={handleSignOut}
       />
 
       <main className="flex-1 min-w-0 pb-24 md:pb-12">{renderMainContent()}</main>
 
-      <CinemaModal photo={cinemaPhoto} onClose={() => setCinemaPhoto(null)} />
+      <CinemaModal
+        items={cinemaState?.items || []}
+        initialIndex={cinemaState?.index || 0}
+        onClose={() => setCinemaState(null)}
+      />
 
       {authModalOpen && (
         <AuthView
+          initialMode={authInitialMode}
           onSuccess={() => {
             setAuthModalOpen(false);
             bumpRefresh();
