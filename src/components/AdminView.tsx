@@ -21,6 +21,18 @@ interface AdminViewProps {
 
 const ADMIN_TOKEN_STORAGE_KEY = 'startorigin_admin_token';
 
+async function readJsonSafe(res: Response): Promise<Record<string, any>> {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as Record<string, any>;
+  } catch {
+    return {
+      error: `Server returned HTTP ${res.status}. Check /api/admin configuration and environment variables.`,
+    };
+  }
+}
+
 export const AdminView: React.FC<AdminViewProps> = ({
   onExitAdmin,
   onOpenCinema,
@@ -68,9 +80,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
         setAuthError('Session expired. Enter admin password again.');
         return;
       }
-      const data = await res.json();
+      const data = await readJsonSafe(res);
       if (!res.ok) {
-        setError(data.error || 'Failed to load posts.');
+        setError(data.error || `Failed to load posts (HTTP ${res.status}).`);
         return;
       }
       setPhotos((data.photos as PhotoWithAuthor[]) || []);
@@ -101,9 +113,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
       });
-      const data = await res.json();
+      const data = await readJsonSafe(res);
       if (!res.ok || !data.token) {
-        setAuthError(data.error || 'Invalid password.');
+        setAuthError(
+          data.error || `Authentication failed (HTTP ${res.status}).`
+        );
         return;
       }
       setToken(data.token);
@@ -136,9 +150,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
         clearToken();
         return;
       }
-      const data = await res.json();
+      const data = await readJsonSafe(res);
       if (!res.ok) {
-        setError(data.error || 'Failed to delete post.');
+        setError(data.error || `Failed to delete post (HTTP ${res.status}).`);
         return;
       }
       setPhotos((prev) => prev.filter((p) => p.id !== photo.id));

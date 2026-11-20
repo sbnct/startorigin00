@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS public.activity_logs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   actor_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
-  action_type text NOT NULL CHECK (action_type IN ('upload', 'collection', 'like', 'subscribe', 'save_collection', 'save_photo')),
+  action_type text NOT NULL CHECK (action_type IN ('upload', 'collection', 'like', 'subscribe', 'save_collection', 'save_photo', 'achievement')),
   target_id uuid,
   description text NOT NULL,
   is_public boolean NOT NULL DEFAULT true,
@@ -423,3 +423,191 @@ CREATE POLICY "Users can delete own storage objects"
     bucket_id IN ('photos', 'avatars')
     AND (storage.foldername(name))[1] = auth.uid()::text
   );
+
+-- 7. Achievement Progress Tracking
+ALTER TABLE public.activity_logs
+  DROP CONSTRAINT IF EXISTS activity_logs_action_type_check;
+ALTER TABLE public.activity_logs
+  ADD CONSTRAINT activity_logs_action_type_check
+  CHECK (action_type IN ('upload', 'collection', 'like', 'subscribe', 'save_collection', 'save_photo', 'achievement'));
+
+CREATE TABLE IF NOT EXISTS public.user_achievements (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  achievement_id text NOT NULL,
+  progress integer NOT NULL DEFAULT 0,
+  target integer NOT NULL,
+  unlocked boolean NOT NULL DEFAULT false,
+  unlocked_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, achievement_id)
+);
+
+CREATE INDEX IF NOT EXISTS user_achievements_user_idx
+  ON public.user_achievements (user_id, unlocked);
+
+ALTER TABLE public.user_achievements ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Unlocked achievements are viewable by everyone; progress by owner" ON public.user_achievements;
+CREATE POLICY "Unlocked achievements are viewable by everyone; progress by owner"
+  ON public.user_achievements FOR SELECT
+  USING (unlocked = true OR auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert own achievement progress" ON public.user_achievements;
+CREATE POLICY "Users can insert own achievement progress"
+  ON public.user_achievements FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can update own achievement progress" ON public.user_achievements;
+CREATE POLICY "Users can update own achievement progress"
+  ON public.user_achievements FOR UPDATE
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE OR REPLACE FUNCTION public.refresh_user_achievements(p_user_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_photos int := 0;
+  v_collections int := 0;
+  v_followers int := 0;
+  v_following int := 0;
+  v_saved int := 0;
+  v_likes_received int := 0;
+  v_verified boolean := false;
+BEGIN
+  IF p_user_id IS NULL THEN
+    RETURN;
+  END IF;
+
+  SELECT COUNT(*) INTO v_photos FROM public.photos WHERE user_id = p_user_id;
+  SELECT COUNT(*) INTO v_collections FROM public.collections WHERE user_id = p_user_id;
+  SELECT COUNT(*) INTO v_followers FROM public.subscriptions WHERE target_user_id = p_user_id;
+  SELECT COUNT(*) INTO v_following FROM public.subscriptions WHERE subscriber_id = p_user_id;
+  SELECT COUNT(*) INTO v_saved FROM public.saved_photos WHERE user_id = p_user_id;
+  SELECT COUNT(*) INTO v_likes_received
+  FROM public.photo_likes pl
+  JOIN public.photos p ON p.id = pl.photo_id
+  WHERE p.user_id = p_user_id;
+
+  SELECT (COALESCE(is_verified, false) OR lower(username) = 'subnocte')
+  INTO v_verified
+  FROM public.profiles
+  WHERE id = p_user_id;
+
+  INSERT INTO public.user_achievements (user_id, achievement_id, progress, target, unlocked, unlocked_at, updated_at)
+  VALUES
+    (p_user_id, 'ten_frames', LEAST(v_photos, 10), 10, v_photos >= 10, CASE WHEN v_photos >= 10 THEN now() ELSE NULL END, now()),
+    (p_user_id, 'fifty_frames', LEAST(v_photos, 50), 50, v_photos >= 50, CASE WHEN v_photos >= 50 THEN now() ELSE NULL END, now()),
+    (p_user_id, 'century_archive', LEAST(v_photos, 150), 150, v_photos >= 150, CASE WHEN v_photos >= 150 THEN now() ELSE NULL END, now()),
+    (p_user_id, 'five_collections', LEAST(v_collections, 5), 5, v_collections >= 5, CASE WHEN v_collections >= 5 THEN now() ELSE NULL END, now()),
+    (p_user_id, 'fifteen_collections', LEAST(v_collections, 15), 15, v_collections >= 15, CASE WHEN v_collections >= 15 THEN now() ELSE NULL END, now()),
+    (p_user_id, 'twentyfive_followers', LEAST(v_followers, 25), 25, v_followers >= 25, CASE WHEN v_followers >= 25 THEN now() ELSE NULL END, now()),
+    (p_user_id, 'hundred_followers', LEAST(v_followers, 100), 100, v_followers >= 100, CASE WHEN v_followers >= 100 THEN now() ELSE NULL END, now()),
+    (p_user_id, 'hundred_likes', LEAST(v_likes_received, 100), 100, v_likes_received >= 100, CASE WHEN v_likes_received >= 100 THEN now() ELSE NULL END, now()),
+    (p_user_id, 'grand_patron', LEAST(v_saved, 30) + LEAST(v_following, 15), 45, (v_saved >= 30 AND v_following >= 15), CASE WHEN (v_saved >= 30 AND v_following >= 15) THEN now() ELSE NULL END, now()),
+    (p_user_id, 'origin_verified', CASE WHEN v_verified THEN 1 ELSE 0 END, 1, v_verified, CASE WHEN v_verified THEN now() ELSE NULL END, now())
+  ON CONFLICT (user_id, achievement_id) DO UPDATE
+  SET
+    progress = EXCLUDED.progress,
+    target = EXCLUDED.target,
+    unlocked = EXCLUDED.unlocked,
+    unlocked_at = COALESCE(public.user_achievements.unlocked_at, EXCLUDED.unlocked_at),
+    updated_at = now();
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.trg_sync_achievements_by_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP IN ('INSERT', 'UPDATE') THEN
+    PERFORM public.refresh_user_achievements(NEW.user_id);
+  END IF;
+  IF TG_OP IN ('DELETE', 'UPDATE') AND OLD.user_id IS DISTINCT FROM NEW.user_id THEN
+    PERFORM public.refresh_user_achievements(OLD.user_id);
+  END IF;
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_photos_achievements ON public.photos;
+CREATE TRIGGER trg_photos_achievements
+  AFTER INSERT OR UPDATE OR DELETE ON public.photos
+  FOR EACH ROW EXECUTE FUNCTION public.trg_sync_achievements_by_user();
+
+DROP TRIGGER IF EXISTS trg_collections_achievements ON public.collections;
+CREATE TRIGGER trg_collections_achievements
+  AFTER INSERT OR UPDATE OR DELETE ON public.collections
+  FOR EACH ROW EXECUTE FUNCTION public.trg_sync_achievements_by_user();
+
+DROP TRIGGER IF EXISTS trg_saved_photos_achievements ON public.saved_photos;
+CREATE TRIGGER trg_saved_photos_achievements
+  AFTER INSERT OR DELETE ON public.saved_photos
+  FOR EACH ROW EXECUTE FUNCTION public.trg_sync_achievements_by_user();
+
+CREATE OR REPLACE FUNCTION public.trg_sync_achievements_on_subscription()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP IN ('INSERT', 'UPDATE') THEN
+    PERFORM public.refresh_user_achievements(NEW.target_user_id);
+    PERFORM public.refresh_user_achievements(NEW.subscriber_id);
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    PERFORM public.refresh_user_achievements(OLD.target_user_id);
+    PERFORM public.refresh_user_achievements(OLD.subscriber_id);
+  END IF;
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_subscriptions_achievements ON public.subscriptions;
+CREATE TRIGGER trg_subscriptions_achievements
+  AFTER INSERT OR DELETE ON public.subscriptions
+  FOR EACH ROW EXECUTE FUNCTION public.trg_sync_achievements_on_subscription();
+
+CREATE OR REPLACE FUNCTION public.trg_sync_achievements_on_like()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_owner uuid;
+BEGIN
+  SELECT user_id INTO v_owner
+  FROM public.photos
+  WHERE id = COALESCE(NEW.photo_id, OLD.photo_id);
+  IF v_owner IS NOT NULL THEN
+    PERFORM public.refresh_user_achievements(v_owner);
+  END IF;
+  RETURN COALESCE(NEW, OLD);
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_photo_likes_achievements ON public.photo_likes;
+CREATE TRIGGER trg_photo_likes_achievements
+  AFTER INSERT OR DELETE ON public.photo_likes
+  FOR EACH ROW EXECUTE FUNCTION public.trg_sync_achievements_on_like();
+
+-- Backfill progress for existing users
+DO $$
+DECLARE
+  r record;
+BEGIN
+  FOR r IN SELECT id FROM public.profiles LOOP
+    PERFORM public.refresh_user_achievements(r.id);
+  END LOOP;
+END;
+$$;
+

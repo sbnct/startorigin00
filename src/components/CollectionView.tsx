@@ -28,6 +28,7 @@ import { LikeButton } from './LikeButton';
 import { ResilientImage } from './ResilientImage';
 import { VerifiedBadge } from './VerifiedBadge';
 import { AddPhotoModal } from './AddPhotoModal';
+import { syncAndNotifyAchievements } from '../lib/achievements';
 
 interface CollectionWithAuthor extends Collection {
   profiles?: Pick<Profile, 'id' | 'name' | 'username' | 'avatar_url' | 'is_verified'> | null;
@@ -411,6 +412,7 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
             onShowToast?.(
               `${count} ${count === 1 ? 'photo' : 'photos'} uploaded ${destinationLabel}.`
             );
+            syncAndNotifyAchievements(currentUserId, undefined, onShowToast);
           }}
         />
       )}

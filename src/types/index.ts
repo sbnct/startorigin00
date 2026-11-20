@@ -48,7 +48,7 @@ export interface ActivityLog {
   id: string;
   user_id: string;
   actor_id: string | null;
-  action_type: 'upload' | 'collection' | 'like' | 'subscribe' | 'save_collection' | 'save_photo';
+  action_type: 'upload' | 'collection' | 'like' | 'subscribe' | 'save_collection' | 'save_photo' | 'achievement';
   target_id: string | null;
   description: string;
   is_public: boolean;

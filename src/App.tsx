@@ -15,6 +15,7 @@ import { AuthView } from './components/AuthView';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { AdminView } from './components/AdminView';
 import { LandingView } from './components/LandingView';
+import { syncAndNotifyAchievements } from './lib/achievements';
 
 interface RouteEntry {
   tab: NavTab;
@@ -161,6 +162,11 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, [loadCurrentProfile]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    syncAndNotifyAchievements(session.user.id, currentUserProfile, showToast);
+  }, [session?.user?.id, currentUserProfile?.username, currentUserProfile?.is_verified, refreshKey, showToast]);
 
   const openCinema = useCallback(
     (photo: CinemaPhoto, collectionItems?: CinemaPhoto[]) => {

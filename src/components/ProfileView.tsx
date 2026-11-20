@@ -34,6 +34,16 @@ import { VerifiedBadge } from './VerifiedBadge';
 import { PWAInstallButton } from './PWAInstallButton';
 import { LikeButton } from './LikeButton';
 import { fetchPhotoLikesMap, togglePhotoLike } from '../lib/likes';
+import {
+  AchievementStatus,
+  evaluateAchievements,
+  fetchUserAchievementMetrics,
+  syncAndNotifyAchievements,
+} from '../lib/achievements';
+import {
+  AchievementBadgeIcon,
+  AchievementDetailModal,
+} from './AchievementBadge';
 
 interface ProfileViewProps {
   targetUserId: string | null;
@@ -82,8 +92,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [subscribersCount, setSubscribersCount] = useState(0);
   const [isSubscribed, setIsSubscribed] = useState(false);
+  const [achievements, setAchievements] = useState<AchievementStatus[]>([]);
+  const [selectedBadge, setSelectedBadge] = useState<AchievementStatus | null>(null);
   const [activeTab, setActiveTab] = useState<
-    'photos' | 'collections' | 'saved' | 'activity'
+    'photos' | 'collections' | 'achievements' | 'saved' | 'activity'
   >('photos');
   const [loading, setLoading] = useState(true);
   const [subBusy, setSubBusy] = useState(false);
@@ -177,14 +189,55 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       } else {
         setIsSubscribed(false);
       }
+
+      const typedProfile = (profData as Profile) || null;
+      if (currentUserId && currentUserId === effectiveUserId) {
+        const { statuses, newlyLogged } = await syncAndNotifyAchievements(
+          effectiveUserId,
+          typedProfile,
+          onShowToast
+        );
+        setAchievements(statuses);
+        if (newlyLogged.length > 0) {
+          const { data: refreshedActs } = await supabase
+            .from('activity_logs')
+            .select('*')
+            .eq('user_id', effectiveUserId)
+            .order('created_at', { ascending: false })
+            .limit(30);
+          setActivities((refreshedActs as ActivityLog[]) || []);
+        }
+      } else {
+        const metrics = await fetchUserAchievementMetrics(
+          effectiveUserId,
+          typedProfile
+        );
+        setAchievements(evaluateAchievements(metrics));
+      }
     } finally {
       setLoading(false);
     }
-  }, [effectiveUserId, currentUserId]);
+  }, [effectiveUserId, currentUserId, onShowToast]);
+
+  useEffect(() => {
+    setActiveTab('photos');
+  }, [effectiveUserId]);
 
   useEffect(() => {
     loadProfileData();
   }, [loadProfileData, refreshKey]);
+
+  const unlockedAchievements = achievements.filter((a) => a.unlocked);
+  const showCollectionsTab = isOwnProfile || publicCollections.length > 0;
+  const showAchievementsTab = isOwnProfile || unlockedAchievements.length > 0;
+  const showSavedTab = isOwnProfile || savedPhotos.length > 0;
+
+  useEffect(() => {
+    if (loading) return;
+    if (activeTab === 'collections' && !showCollectionsTab) setActiveTab('photos');
+    if (activeTab === 'achievements' && !showAchievementsTab) setActiveTab('photos');
+    if (activeTab === 'saved' && !showSavedTab) setActiveTab('photos');
+  }, [loading, activeTab, showCollectionsTab, showAchievementsTab, showSavedTab]);
 
   useEffect(() => {
     let active = true;
@@ -297,6 +350,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             description: `Subscribed to @${profile.username}`,
             is_public: true,
           });
+          syncAndNotifyAchievements(currentUserId, undefined, onShowToast);
         }
       }
     } finally {
@@ -570,28 +624,45 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         >
           Photos
         </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('collections')}
-          className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-            activeTab === 'collections'
-              ? 'bg-white text-[#0A0A0A] shadow-xs'
-              : 'text-[#737373] hover:text-[#0A0A0A]'
-          }`}
-        >
-          Collections
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('saved')}
-          className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-            activeTab === 'saved'
-              ? 'bg-white text-[#0A0A0A] shadow-xs'
-              : 'text-[#737373] hover:text-[#0A0A0A]'
-          }`}
-        >
-          Saved Photos
-        </button>
+        {showCollectionsTab && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('collections')}
+            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
+              activeTab === 'collections'
+                ? 'bg-white text-[#0A0A0A] shadow-xs'
+                : 'text-[#737373] hover:text-[#0A0A0A]'
+            }`}
+          >
+            Collections
+          </button>
+        )}
+        {showAchievementsTab && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('achievements')}
+            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
+              activeTab === 'achievements'
+                ? 'bg-white text-[#0A0A0A] shadow-xs'
+                : 'text-[#737373] hover:text-[#0A0A0A]'
+            }`}
+          >
+            Achievements
+          </button>
+        )}
+        {showSavedTab && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('saved')}
+            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
+              activeTab === 'saved'
+                ? 'bg-white text-[#0A0A0A] shadow-xs'
+                : 'text-[#737373] hover:text-[#0A0A0A]'
+            }`}
+          >
+            Saved Photos
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setActiveTab('activity')}
@@ -755,7 +826,106 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       )}
 
-      {/* Tab 2: Saved Photos */}
+      {/* Tab 3: Achievements */}
+      {activeTab === 'achievements' && showAchievementsTab && (
+        <div className="space-y-6">
+          {(() => {
+            const unlockedCount = unlockedAchievements.length;
+            const totalCount = achievements.length || 10;
+            const overallPct = Math.round((unlockedCount / totalCount) * 100);
+            const visibleAchievements = isOwnProfile
+              ? achievements
+              : unlockedAchievements;
+            return (
+              <>
+                <div className="p-5 rounded-3xl border border-black/[0.08] bg-[#FAFAFA] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-sm font-semibold text-[#0A0A0A]">
+                      Achievements
+                    </h2>
+                    <p className="text-xs text-[#737373] mt-0.5 tabular-nums">
+                      {unlockedCount} of {totalCount} unlocked · Click any achievement to see how to unlock it
+                    </p>
+                  </div>
+                  <div className="w-full sm:w-48 space-y-1.5">
+                    <div className="h-2 w-full rounded-full bg-black/[0.06] overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-[#0A0A0A] transition-all duration-300"
+                        style={{ width: `${overallPct}%` }}
+                      />
+                    </div>
+                    <p className="text-[11px] text-[#737373] sm:text-right tabular-nums">
+                      {overallPct}% complete
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  {visibleAchievements.map((status) => {
+                    const { definition, unlocked, progressPct, progressText } = status;
+                    return (
+                      <button
+                        key={definition.id}
+                        type="button"
+                        onClick={() => setSelectedBadge(status)}
+                        className={`p-4 rounded-3xl border text-left transition-all flex items-start gap-3.5 group ${
+                          unlocked
+                            ? 'border-black/[0.1] bg-white hover:bg-[#F5F5F7]'
+                            : 'border-black/[0.06] bg-[#FAFAFA] hover:bg-white'
+                        }`}
+                      >
+                        <AchievementBadgeIcon status={status} size="md" />
+
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <h3 className="text-sm font-semibold text-[#0A0A0A] truncate group-hover:underline">
+                                {definition.name}
+                              </h3>
+                              <p className="text-[11px] text-[#737373]">
+                                {definition.category} · {definition.tier}
+                              </p>
+                            </div>
+                            {unlocked && (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#059669] shrink-0">
+                                <Check className="w-3.5 h-3.5" strokeWidth={2.2} />
+                                <span>Unlocked</span>
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="text-xs text-[#525252] line-clamp-2">
+                            {definition.howToGet}
+                          </p>
+
+                          <div className="space-y-1 pt-0.5">
+                            <div className="h-1.5 w-full rounded-full bg-black/[0.06] overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all duration-300"
+                                style={{
+                                  width: `${progressPct}%`,
+                                  backgroundColor: unlocked
+                                    ? definition.accentHex
+                                    : '#0A0A0A',
+                                }}
+                              />
+                            </div>
+                            <p className="text-[11px] text-[#737373] tabular-nums">
+                              {progressText}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Tab 4: Saved Photos */}
       {activeTab === 'saved' && (
         <div>
           {savedPhotos.length === 0 ? (
@@ -961,6 +1131,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </form>
         </div>
       )}
+
+      {/* Badge Detail Modal */}
+      <AchievementDetailModal
+        status={selectedBadge}
+        onClose={() => setSelectedBadge(null)}
+      />
     </div>
   );
 };
