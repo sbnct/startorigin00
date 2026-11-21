@@ -3,6 +3,15 @@ import { Layers, Trash2, Upload, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { Collection, PhotoPrivacy } from '../types';
 import { sanitizeFilename } from '../lib/utils';
+import {
+  acceptUploadRules,
+  formatCooldownDuration,
+  getUploadCooldownRemainingMs,
+  hasAcceptedUploadRules,
+  recordPhotoUploadTimestamp,
+  syncUploadCooldownFromServer,
+} from '../lib/uploadGuard';
+import { RulesModal } from './RulesModal';
 
 interface AddPhotoModalProps {
   isOpen: boolean;
@@ -40,14 +49,25 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
   const [fileLimitNotice, setFileLimitNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cooldownMs, setCooldownMs] = useState(0);
+  const [rulesConfirmOpen, setRulesConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
       setUnifiedCollectionId(defaultCollectionId);
       setError(null);
       setFileLimitNotice(null);
+      syncUploadCooldownFromServer(currentUserId).then(setCooldownMs);
     }
-  }, [isOpen, defaultCollectionId]);
+  }, [isOpen, defaultCollectionId, currentUserId]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const timer = window.setInterval(() => {
+      setCooldownMs(getUploadCooldownRemainingMs(currentUserId));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isOpen, currentUserId]);
 
   useEffect(() => {
     return () => {
@@ -123,25 +143,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       .slice(0, 12);
   };
 
-  const handleUploadPhotos = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    if (items.length === 0) {
-      setError('Please select at least 1 photo (up to 10).');
-      return;
-    }
-
-    if (useUnified && !unifiedTitle.trim()) {
-      setError('Please enter a photo name.');
-      return;
-    }
-
-    if (!useUnified && items.some((it) => !it.title.trim())) {
-      setError('Every photo needs a name.');
-      return;
-    }
-
+  const performUpload = async () => {
     setSubmitting(true);
     try {
       const uploadedRows: {
@@ -206,6 +208,9 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
         throw new Error(insertErr.message);
       }
 
+      recordPhotoUploadTimestamp(currentUserId);
+      setCooldownMs(getUploadCooldownRemainingMs(currentUserId));
+
       const hasPublic = uploadedRows.some((r) => r.privacy === 'public');
       try {
         await supabase.from('activity_logs').insert({
@@ -241,6 +246,42 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleUploadPhotos = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+
+    const remaining = await syncUploadCooldownFromServer(currentUserId);
+    if (remaining > 0) {
+      setCooldownMs(remaining);
+      setError(
+        `Please wait ${formatCooldownDuration(remaining)} before uploading more photos.`
+      );
+      return;
+    }
+
+    if (items.length === 0) {
+      setError('Please select at least 1 photo (up to 10).');
+      return;
+    }
+
+    if (useUnified && !unifiedTitle.trim()) {
+      setError('Please enter a photo name.');
+      return;
+    }
+
+    if (!useUnified && items.some((it) => !it.title.trim())) {
+      setError('Every photo needs a name.');
+      return;
+    }
+
+    if (!hasAcceptedUploadRules(currentUserId)) {
+      setRulesConfirmOpen(true);
+      return;
+    }
+
+    await performUpload();
   };
 
   return (
@@ -514,6 +555,16 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
           </div>
         )}
 
+        {cooldownMs > 0 && (
+          <div className="p-3.5 rounded-2xl bg-[#F5F5F7] border border-black/[0.08] text-xs text-[#525252] tabular-nums">
+            Rate limit active: you can upload your next photos in{' '}
+            <strong className="font-semibold text-[#0A0A0A]">
+              {formatCooldownDuration(cooldownMs)}
+            </strong>
+            .
+          </div>
+        )}
+
         <div className="flex items-center justify-end gap-2 pt-2 border-t border-black/[0.06]">
           <button
             type="button"
@@ -525,17 +576,30 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
           </button>
           <button
             type="submit"
-            disabled={submitting || items.length === 0}
+            disabled={submitting || items.length === 0 || cooldownMs > 0}
             className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#0A0A0A] text-white text-xs sm:text-sm font-medium hover:bg-black/85 transition-colors disabled:opacity-40 whitespace-nowrap"
           >
             {submitting
               ? 'Uploading...'
+              : cooldownMs > 0
+              ? `Wait ${formatCooldownDuration(cooldownMs)}`
               : `Upload ${items.length || ''} ${
                   items.length === 1 ? 'Photo' : 'Photos'
                 }`}
           </button>
         </div>
       </form>
+
+      <RulesModal
+        isOpen={rulesConfirmOpen}
+        onClose={() => setRulesConfirmOpen(false)}
+        requireAcknowledge
+        onAcknowledge={() => {
+          acceptUploadRules(currentUserId);
+          setRulesConfirmOpen(false);
+          performUpload();
+        }}
+      />
     </div>
   );
 };

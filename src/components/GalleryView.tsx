@@ -6,6 +6,7 @@ import {
   Folder,
   FolderInput,
   Globe,
+  Info,
   Link2,
   Lock,
   MoreHorizontal,
@@ -35,6 +36,7 @@ import {
 import { AuthView } from './AuthView';
 import { ResilientImage } from './ResilientImage';
 import { AddPhotoModal } from './AddPhotoModal';
+import { RulesModal } from './RulesModal';
 
 interface GalleryViewProps {
   currentUserId: string | null;
@@ -86,6 +88,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
     open: boolean;
     collectionId: string;
   }>({ open: false, collectionId: '' });
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   const loadGallery = useCallback(async () => {
     if (!currentUserId) return;
@@ -554,6 +557,16 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                 >
                   <Pencil className="w-4 h-4" strokeWidth={1.75} />
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRulesOpen(true)}
+                  aria-label="Open StartOrigin rules"
+                  title="Rules"
+                  className="min-h-[40px] min-w-[40px] p-2.5 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
+                >
+                  <Info className="w-4 h-4" strokeWidth={1.75} />
+                </button>
               </div>
             </div>
 
@@ -568,10 +581,19 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             </div>
           </div>
         ) : (
-          <div>
+          <div className="flex items-center justify-between gap-3">
             <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-[#0A0A0A]">
               Gallery
             </h1>
+            <button
+              type="button"
+              onClick={() => setRulesOpen(true)}
+              aria-label="Open StartOrigin rules"
+              title="Rules"
+              className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-full bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A] transition-colors"
+            >
+              <Info className="w-4 h-4" strokeWidth={1.75} />
+            </button>
           </div>
         )}
       </div>
@@ -811,18 +833,33 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                           </p>
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setAddModalState({ open: true, collectionId: col.id });
-                          }}
-                          aria-label={`Add photo to ${col.name}`}
-                          title="Add photo"
-                          className="min-h-[36px] min-w-[36px] p-2 rounded-xl bg-white border border-black/[0.1] hover:bg-[#0A0A0A] hover:text-white hover:border-[#0A0A0A] text-[#0A0A0A] inline-flex items-center justify-center transition-colors shrink-0"
-                        >
-                          <Plus className="w-4 h-4" strokeWidth={2} />
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRulesOpen(true);
+                            }}
+                            aria-label="Open StartOrigin rules"
+                            title="Rules"
+                            className="min-h-[36px] min-w-[36px] p-2 rounded-xl bg-white border border-black/[0.1] hover:bg-black/[0.05] text-[#0A0A0A] inline-flex items-center justify-center transition-colors shrink-0"
+                          >
+                            <Info className="w-4 h-4" strokeWidth={1.75} />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAddModalState({ open: true, collectionId: col.id });
+                            }}
+                            aria-label={`Add photo to ${col.name}`}
+                            title="Add photo"
+                            className="min-h-[36px] min-w-[36px] p-2 rounded-xl bg-white border border-black/[0.1] hover:bg-[#0A0A0A] hover:text-white hover:border-[#0A0A0A] text-[#0A0A0A] inline-flex items-center justify-center transition-colors shrink-0"
+                          >
+                            <Plus className="w-4 h-4" strokeWidth={2} />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1147,6 +1184,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
           }}
         />
       )}
+      <RulesModal isOpen={rulesOpen} onClose={() => setRulesOpen(false)} />
     </div>
   );
 };

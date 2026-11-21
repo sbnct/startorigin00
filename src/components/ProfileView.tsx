@@ -5,6 +5,7 @@ import {
   Bookmark,
   Camera,
   Check,
+  Flag,
   Folder,
   Link2,
   LogOut,
@@ -793,37 +794,50 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </button>
               )}
             </>
-          ) : currentUserId ? (
-            isRestrictedByOwner ? (
-              <span className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[#F5F5F7] border border-black/[0.08] text-xs font-medium text-[#737373] inline-flex items-center gap-2 whitespace-nowrap">
-                <Ban className="w-3.5 h-3.5" />
-                <span>Restricted</span>
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={handleToggleSubscribe}
-                disabled={subBusy}
-                className={`min-h-[44px] px-5 py-2.5 rounded-xl text-xs font-medium inline-flex items-center gap-2 transition-colors whitespace-nowrap ${
-                  isSubscribed
-                    ? 'bg-[#F5F5F7] text-[#0A0A0A] border border-black/[0.1]'
-                    : 'bg-[#0A0A0A] text-white hover:bg-black/85'
-                }`}
-              >
-                {isSubscribed ? (
-                  <>
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Subscribed</span>
-                  </>
+          ) : (
+            <>
+              {currentUserId &&
+                (isRestrictedByOwner ? (
+                  <span className="min-h-[44px] px-4 py-2.5 rounded-xl bg-[#F5F5F7] border border-black/[0.08] text-xs font-medium text-[#737373] inline-flex items-center gap-2 whitespace-nowrap">
+                    <Ban className="w-3.5 h-3.5" />
+                    <span>Restricted</span>
+                  </span>
                 ) : (
-                  <>
-                    <UserPlus className="w-3.5 h-3.5" />
-                    <span>Subscribe</span>
-                  </>
-                )}
-              </button>
-            )
-          ) : null}
+                  <button
+                    type="button"
+                    onClick={handleToggleSubscribe}
+                    disabled={subBusy}
+                    className={`min-h-[44px] px-5 py-2.5 rounded-xl text-xs font-medium inline-flex items-center gap-2 transition-colors whitespace-nowrap ${
+                      isSubscribed
+                        ? 'bg-[#F5F5F7] text-[#0A0A0A] border border-black/[0.1]'
+                        : 'bg-[#0A0A0A] text-white hover:bg-black/85'
+                    }`}
+                  >
+                    {isSubscribed ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Subscribed</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>Subscribe</span>
+                      </>
+                    )}
+                  </button>
+                ))}
+
+              <a
+                href="https://forms.gle/HgAKvJoMa3mBU3Bd6"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-h-[44px] px-4 py-2.5 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#525252] hover:text-[#0A0A0A] inline-flex items-center gap-2 transition-colors whitespace-nowrap"
+              >
+                <Flag className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>Report</span>
+              </a>
+            </>
+          )}
         </div>
       </div>
 

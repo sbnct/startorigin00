@@ -4,6 +4,7 @@ import {
   Check,
   Folder,
   Globe,
+  Info,
   Link2,
   Lock,
   Plus,
@@ -30,6 +31,7 @@ import { ResilientImage } from './ResilientImage';
 import { VerifiedBadge } from './VerifiedBadge';
 import { AddPhotoModal } from './AddPhotoModal';
 import { syncAndNotifyAchievements } from '../lib/achievements';
+import { RulesModal } from './RulesModal';
 
 interface CollectionWithAuthor extends Collection {
   profiles?: Pick<Profile, 'id' | 'name' | 'username' | 'avatar_url' | 'is_verified'> | null;
@@ -65,6 +67,7 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [ownerCollections, setOwnerCollections] = useState<Collection[]>([]);
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   const loadCollection = useCallback(async () => {
     setLoading(true);
@@ -322,6 +325,16 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
               <Link2 className="w-4 h-4" strokeWidth={1.75} />
             )}
           </button>
+
+          <button
+            type="button"
+            onClick={() => setRulesOpen(true)}
+            aria-label="Open StartOrigin rules"
+            title="Rules"
+            className="min-h-[44px] min-w-[44px] p-2.5 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
+          >
+            <Info className="w-4 h-4" strokeWidth={1.75} />
+          </button>
         </div>
       </div>
 
@@ -455,6 +468,7 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
           }}
         />
       )}
+      <RulesModal isOpen={rulesOpen} onClose={() => setRulesOpen(false)} />
     </div>
   );
 };

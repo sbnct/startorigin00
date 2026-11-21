@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Bookmark, Check, ChevronRight, Folder, Heart, Link2, Maximize2 } from 'lucide-react';
+import { ArrowLeft, Bookmark, Check, ChevronRight, Flag, Folder, Heart, Link2, Maximize2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { CinemaPhoto, PhotoWithAuthor } from '../types';
 import {
@@ -535,6 +535,16 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
               </>
             )}
           </button>
+
+          <a
+            href="https://forms.gle/HgAKvJoMa3mBU3Bd6"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="min-h-[44px] px-4 py-2 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#525252] hover:text-[#0A0A0A] inline-flex items-center gap-2 transition-colors whitespace-nowrap"
+          >
+            <Flag className="w-3.5 h-3.5" strokeWidth={1.75} />
+            <span>Report</span>
+          </a>
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Check, Compass, Link2, RefreshCw, Users } from 'lucide-react';
+import { Check, Compass, Info, Link2, RefreshCw, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { CinemaPhoto, PhotoWithAuthor } from '../types';
 import {
@@ -14,6 +14,7 @@ import { VerifiedBadge } from './VerifiedBadge';
 import { LikeButton } from './LikeButton';
 import { fetchPhotoLikesMap, togglePhotoLike } from '../lib/likes';
 import { APP_VERSION, RoadmapModal } from './RoadmapModal';
+import { RulesModal } from './RulesModal';
 
 interface FeedViewProps {
   currentUserId: string | null;
@@ -45,6 +46,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [roadmapOpen, setRoadmapOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   const loadFeed = useCallback(async () => {
     setLoading(true);
@@ -245,6 +247,16 @@ export const FeedView: React.FC<FeedViewProps> = ({
               strokeWidth={1.75}
             />
           </button>
+
+          <button
+            type="button"
+            onClick={() => setRulesOpen(true)}
+            aria-label="Open StartOrigin rules"
+            title="Rules"
+            className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-full bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A] transition-colors"
+          >
+            <Info className="w-4 h-4" strokeWidth={1.75} />
+          </button>
         </div>
       </div>
 
@@ -434,6 +446,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
       </div>
 
       <RoadmapModal isOpen={roadmapOpen} onClose={() => setRoadmapOpen(false)} />
+      <RulesModal isOpen={rulesOpen} onClose={() => setRulesOpen(false)} />
     </div>
   );
 };

@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   FolderPlus,
   ImagePlus,
+  Info,
   Layers,
   Link2,
   Trash2,
@@ -17,7 +18,16 @@ import {
   getCollectionShareUrl,
   sanitizeFilename,
 } from '../lib/utils';
+import {
+  acceptUploadRules,
+  formatCooldownDuration,
+  getUploadCooldownRemainingMs,
+  hasAcceptedUploadRules,
+  recordPhotoUploadTimestamp,
+  syncUploadCooldownFromServer,
+} from '../lib/uploadGuard';
 import { AuthView } from './AuthView';
+import { RulesModal } from './RulesModal';
 
 interface AddViewProps {
   currentUserId: string | null;
@@ -69,6 +79,9 @@ export const AddView: React.FC<AddViewProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmationMessage, setConfirmationMessage] = useState<string | null>(null);
+  const [cooldownMs, setCooldownMs] = useState(0);
+  const [rulesInfoOpen, setRulesInfoOpen] = useState(false);
+  const [rulesConfirmOpen, setRulesConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -80,6 +93,24 @@ export const AddView: React.FC<AddViewProps> = ({
       .then(({ data }) => {
         setCollections((data as Collection[]) || []);
       });
+  }, [currentUserId, mode]);
+
+  useEffect(() => {
+    if (!currentUserId) {
+      setCooldownMs(0);
+      return;
+    }
+    let active = true;
+    syncUploadCooldownFromServer(currentUserId).then((rem) => {
+      if (active) setCooldownMs(rem);
+    });
+    const timer = window.setInterval(() => {
+      setCooldownMs(getUploadCooldownRemainingMs(currentUserId));
+    }, 1000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, [currentUserId, mode]);
 
   useEffect(() => {
@@ -151,26 +182,7 @@ export const AddView: React.FC<AddViewProps> = ({
       .slice(0, 12);
   };
 
-  const handleUploadPhotos = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setConfirmationMessage(null);
-
-    if (items.length === 0) {
-      setError('Please select at least 1 photo (up to 10).');
-      return;
-    }
-
-    if (useUnified && !unifiedTitle.trim()) {
-      setError('Please enter a photo name in unified settings.');
-      return;
-    }
-
-    if (!useUnified && items.some((it) => !it.title.trim())) {
-      setError('Every photo needs a name.');
-      return;
-    }
-
+  const performPhotoUpload = async () => {
     setSubmitting(true);
     try {
       const uploadedRows: {
@@ -237,6 +249,9 @@ export const AddView: React.FC<AddViewProps> = ({
         throw new Error(insertErr.message);
       }
 
+      recordPhotoUploadTimestamp(currentUserId);
+      setCooldownMs(getUploadCooldownRemainingMs(currentUserId));
+
       // Log activity
       const hasPublic = uploadedRows.some((r) => r.privacy === 'public');
       await supabase.from('activity_logs').insert({
@@ -275,6 +290,43 @@ export const AddView: React.FC<AddViewProps> = ({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleUploadPhotos = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setConfirmationMessage(null);
+
+    const remaining = await syncUploadCooldownFromServer(currentUserId);
+    if (remaining > 0) {
+      setCooldownMs(remaining);
+      setError(
+        `Please wait ${formatCooldownDuration(remaining)} before uploading more photos.`
+      );
+      return;
+    }
+
+    if (items.length === 0) {
+      setError('Please select at least 1 photo (up to 10).');
+      return;
+    }
+
+    if (useUnified && !unifiedTitle.trim()) {
+      setError('Please enter a photo name in unified settings.');
+      return;
+    }
+
+    if (!useUnified && items.some((it) => !it.title.trim())) {
+      setError('Every photo needs a name.');
+      return;
+    }
+
+    if (!hasAcceptedUploadRules(currentUserId)) {
+      setRulesConfirmOpen(true);
+      return;
+    }
+
+    await performPhotoUpload();
   };
 
   const handleCreateCollection = async (e: React.FormEvent) => {
@@ -350,7 +402,17 @@ export const AddView: React.FC<AddViewProps> = ({
 
   if (mode === 'choose') {
     return (
-      <div className="min-h-[calc(100vh-140px)] md:min-h-[calc(100vh-40px)] flex flex-col items-center justify-center px-4 py-12">
+      <div className="relative min-h-[calc(100vh-140px)] md:min-h-[calc(100vh-40px)] flex flex-col items-center justify-center px-4 py-12">
+        <button
+          type="button"
+          onClick={() => setRulesInfoOpen(true)}
+          aria-label="Open StartOrigin rules"
+          title="Rules"
+          className="absolute top-4 right-4 sm:top-6 sm:right-6 min-h-[40px] min-w-[40px] flex items-center justify-center rounded-full bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A] transition-colors"
+        >
+          <Info className="w-4 h-4" strokeWidth={1.75} />
+        </button>
+
         <div className="w-full max-w-xl text-center mb-10">
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-[#0A0A0A]">
             Add
@@ -398,25 +460,42 @@ export const AddView: React.FC<AddViewProps> = ({
             </div>
           </button>
         </div>
+
+        <RulesModal
+          isOpen={rulesInfoOpen}
+          onClose={() => setRulesInfoOpen(false)}
+        />
       </div>
     );
   }
 
   return (
-    <div className="min-h-[calc(100vh-140px)] md:min-h-[calc(100vh-40px)] flex flex-col items-center justify-center px-4 py-8 sm:py-12">
+    <div className="relative min-h-[calc(100vh-140px)] md:min-h-[calc(100vh-40px)] flex flex-col items-center justify-center px-4 py-8 sm:py-12">
       <div className="w-full max-w-2xl">
-        <button
-          type="button"
-          onClick={() => {
-            setMode('choose');
-            setError(null);
-            setConfirmationMessage(null);
-          }}
-          className="min-h-[44px] px-4 py-2 mb-6 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-2 transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" strokeWidth={1.75} />
-          <span>Back</span>
-        </button>
+        <div className="flex items-center justify-between gap-3 mb-6">
+          <button
+            type="button"
+            onClick={() => {
+              setMode('choose');
+              setError(null);
+              setConfirmationMessage(null);
+            }}
+            className="min-h-[44px] px-4 py-2 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-2 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" strokeWidth={1.75} />
+            <span>Back</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setRulesInfoOpen(true)}
+            aria-label="Open StartOrigin rules"
+            title="Rules"
+            className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-full bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A] transition-colors"
+          >
+            <Info className="w-4 h-4" strokeWidth={1.75} />
+          </button>
+        </div>
 
         {confirmationMessage && (
           <div className="mb-6 p-5 rounded-3xl bg-[#F5F5F7] border border-black/[0.1] space-y-3">
@@ -786,13 +865,25 @@ export const AddView: React.FC<AddViewProps> = ({
               </div>
             )}
 
+            {cooldownMs > 0 && (
+              <div className="p-3.5 rounded-2xl bg-[#F5F5F7] border border-black/[0.08] text-xs text-[#525252] tabular-nums">
+                Rate limit active: you can upload your next photos in{' '}
+                <strong className="font-semibold text-[#0A0A0A]">
+                  {formatCooldownDuration(cooldownMs)}
+                </strong>
+                .
+              </div>
+            )}
+
             <button
               type="submit"
-              disabled={submitting || items.length === 0}
+              disabled={submitting || items.length === 0 || cooldownMs > 0}
               className="w-full min-h-[46px] px-5 py-3 rounded-xl bg-[#0A0A0A] text-white text-sm font-medium hover:bg-black/85 transition-colors disabled:opacity-40"
             >
               {submitting
                 ? 'Uploading...'
+                : cooldownMs > 0
+                ? `Wait ${formatCooldownDuration(cooldownMs)}`
                 : `Upload ${items.length || ''} ${
                     items.length === 1 ? 'Photo' : 'Photos'
                   }`}
@@ -800,6 +891,22 @@ export const AddView: React.FC<AddViewProps> = ({
           </form>
         )}
       </div>
+
+      <RulesModal
+        isOpen={rulesInfoOpen}
+        onClose={() => setRulesInfoOpen(false)}
+      />
+
+      <RulesModal
+        isOpen={rulesConfirmOpen}
+        onClose={() => setRulesConfirmOpen(false)}
+        requireAcknowledge
+        onAcknowledge={() => {
+          acceptUploadRules(currentUserId);
+          setRulesConfirmOpen(false);
+          performPhotoUpload();
+        }}
+      />
     </div>
   );
 };
