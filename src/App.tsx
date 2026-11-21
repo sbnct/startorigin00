@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 import { CinemaPhoto, NavTab, Profile } from './types';
@@ -16,6 +16,46 @@ import { OfflineIndicator } from './components/OfflineIndicator';
 import { AdminView } from './components/AdminView';
 import { LandingView } from './components/LandingView';
 import { syncAndNotifyAchievements } from './lib/achievements';
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+}
+
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  ErrorBoundaryState
+> {
+  state: ErrorBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): ErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error('StartOrigin recovered from render error:', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-white text-[#0A0A0A] flex flex-col items-center justify-center px-4 text-center space-y-4">
+          <h1 className="text-xl font-semibold tracking-tight">Something went wrong</h1>
+          <p className="text-xs text-[#737373] max-w-xs">
+            Please tap below to restore the view.
+          </p>
+          <button
+            type="button"
+            onClick={() => this.setState({ hasError: false })}
+            className="min-h-[42px] px-5 py-2 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium hover:bg-black/85 transition-colors"
+          >
+            Try Again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 interface RouteEntry {
   tab: NavTab;
@@ -67,7 +107,7 @@ function syncUrlForRoute(entry: RouteEntry) {
   window.history.replaceState({}, '', url.pathname + url.search);
 }
 
-export default function App() {
+function AppContent() {
   const [isAdminRoute, setIsAdminRoute] = useState<boolean>(isAdminPath);
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -107,55 +147,67 @@ export default function App() {
       return;
     }
 
-    const user = activeSession.user;
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle();
+    try {
+      const user = activeSession.user;
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle();
 
-    if (data) {
-      setCurrentUserProfile(data as Profile);
-      return;
-    }
+      if (data) {
+        setCurrentUserProfile(data as Profile);
+        return;
+      }
 
-    const meta = user.user_metadata || {};
-    const fallbackUsername =
-      (meta.username as string) ||
-      `user_${user.id.replace(/-/g, '').slice(0, 8)}`;
-    const fallbackName =
-      (meta.name as string) || (user.email ? user.email.split('@')[0] : 'Creator');
+      const meta = user.user_metadata || {};
+      const fallbackUsername =
+        (meta.username as string) ||
+        `user_${user.id.replace(/-/g, '').slice(0, 8)}`;
+      const fallbackName =
+        (meta.name as string) || (user.email ? user.email.split('@')[0] : 'Creator');
 
-    const { data: inserted } = await supabase
-      .from('profiles')
-      .upsert(
-        {
-          id: user.id,
-          name: fallbackName,
-          username: fallbackUsername,
-          email: user.email || '',
-        },
-        { onConflict: 'id' }
-      )
-      .select()
-      .maybeSingle();
+      const { data: inserted } = await supabase
+        .from('profiles')
+        .upsert(
+          {
+            id: user.id,
+            name: fallbackName,
+            username: fallbackUsername,
+            email: user.email || '',
+          },
+          { onConflict: 'id' }
+        )
+        .select()
+        .maybeSingle();
 
-    if (inserted) {
-      setCurrentUserProfile(inserted as Profile);
+      if (inserted) {
+        setCurrentUserProfile(inserted as Profile);
+      }
+    } catch {
+      // Non-fatal; keep session intact even if profile fetch momentarily fails
     }
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      loadCurrentProfile(data.session);
-      setAuthReady(true);
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        setSession(data.session);
+        loadCurrentProfile(data.session);
+        setAuthReady(true);
+      })
+      .catch(() => {
+        setAuthReady(true);
+      });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
+      if (nextSession?.user) {
+        setAuthModalOpen(false);
+      }
       loadCurrentProfile(nextSession);
       setAuthReady(true);
     });
@@ -165,8 +217,16 @@ export default function App() {
 
   useEffect(() => {
     if (!session?.user?.id) return;
-    syncAndNotifyAchievements(session.user.id, currentUserProfile, showToast);
-  }, [session?.user?.id, currentUserProfile?.username, currentUserProfile?.is_verified, refreshKey, showToast]);
+    syncAndNotifyAchievements(session.user.id, currentUserProfile, showToast).catch(
+      () => {}
+    );
+  }, [
+    session?.user?.id,
+    currentUserProfile?.username,
+    currentUserProfile?.is_verified,
+    refreshKey,
+    showToast,
+  ]);
 
   const openCinema = useCallback(
     (photo: CinemaPhoto, collectionItems?: CinemaPhoto[]) => {
@@ -240,11 +300,18 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    setCurrentUserProfile(null);
-    setBrowseAsGuest(false);
-    setRouteStack([{ tab: 'feed' }]);
-    setRefreshKey((k) => k + 1);
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // Ensure local session clears cleanly even if signOut request fails
+    } finally {
+      setSession(null);
+      setCurrentUserProfile(null);
+      setAuthModalOpen(false);
+      setBrowseAsGuest(false);
+      setRouteStack([{ tab: 'feed' }]);
+      setRefreshKey((k) => k + 1);
+    }
   };
 
   const handleExitAdmin = () => {
@@ -498,5 +565,13 @@ export default function App() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <AppErrorBoundary>
+      <AppContent />
+    </AppErrorBoundary>
   );
 }

@@ -130,7 +130,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [editSaving, setEditSaving] = useState(false);
 
   const loadProfileData = useCallback(async () => {
-    if (!effectiveUserId) return;
+    if (!effectiveUserId) {
+      setProfile(null);
+      setPublicPhotos([]);
+      setPublicCollections([]);
+      setSavedPhotos([]);
+      setActivities([]);
+      setAchievements([]);
+      setSubscribersCount(0);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       let viewerIsSubscriber = false;
@@ -356,16 +366,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     }
   };
 
-  if (!effectiveUserId) {
-    return (
-      <AuthView
-        embedded
-        onSuccess={onAuthSuccess}
-        subtitle="Sign in to view and manage your StartOrigin profile."
-      />
-    );
-  }
-
   const loadSubscribersModal = useCallback(async () => {
     if (!currentUserId || !isOwnProfile) return;
     setSubscribersLoading(true);
@@ -403,6 +403,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       setSubscribersLoading(false);
     }
   }, [currentUserId, isOwnProfile]);
+
+  if (!effectiveUserId) {
+    return (
+      <AuthView
+        embedded
+        onSuccess={onAuthSuccess}
+        subtitle="Sign in to view and manage your StartOrigin profile."
+      />
+    );
+  }
 
   const openSubscribersModal = () => {
     if (!isOwnProfile) return;
