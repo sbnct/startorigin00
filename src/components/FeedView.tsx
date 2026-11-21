@@ -13,6 +13,7 @@ import { ResilientImage } from './ResilientImage';
 import { VerifiedBadge } from './VerifiedBadge';
 import { LikeButton } from './LikeButton';
 import { fetchPhotoLikesMap, togglePhotoLike } from '../lib/likes';
+import { APP_VERSION, RoadmapModal } from './RoadmapModal';
 
 interface FeedViewProps {
   currentUserId: string | null;
@@ -43,6 +44,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [roadmapOpen, setRoadmapOpen] = useState(false);
 
   const loadFeed = useCallback(async () => {
     setLoading(true);
@@ -192,10 +194,18 @@ export const FeedView: React.FC<FeedViewProps> = ({
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div>
+        <div className="flex items-center gap-2.5">
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-[#0A0A0A]">
             Feed
           </h1>
+          <button
+            type="button"
+            onClick={() => setRoadmapOpen(true)}
+            aria-label={`Open roadmap (${APP_VERSION})`}
+            className="min-h-[30px] px-2.5 py-1 rounded-xl border border-black/[0.1] bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#525252] hover:text-[#0A0A0A] transition-colors tabular-nums"
+          >
+            {APP_VERSION}
+          </button>
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
@@ -422,6 +432,8 @@ export const FeedView: React.FC<FeedViewProps> = ({
           });
         })()}
       </div>
+
+      <RoadmapModal isOpen={roadmapOpen} onClose={() => setRoadmapOpen(false)} />
     </div>
   );
 };

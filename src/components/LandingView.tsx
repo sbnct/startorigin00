@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowRight } from 'lucide-react';
+import { APP_VERSION, RoadmapModal } from './RoadmapModal';
 
 interface LandingViewProps {
   onGetStarted: () => void;
@@ -18,6 +19,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
   const [heroReady, setHeroReady] = useState(false);
   const [capabilitiesVisible, setCapabilitiesVisible] = useState(false);
   const [ctaVisible, setCtaVisible] = useState(false);
+  const [roadmapOpen, setRoadmapOpen] = useState(false);
 
   const capabilitiesRef = useRef<HTMLElement | null>(null);
   const ctaRef = useRef<HTMLElement | null>(null);
@@ -71,7 +73,25 @@ export const LandingView: React.FC<LandingViewProps> = ({
         <div aria-hidden="true" className="h-6" />
 
         <div className="max-w-4xl mx-auto text-center space-y-10">
-          <h1 className="text-[clamp(2.75rem,8vw,6rem)] font-semibold tracking-tight leading-[1.04] text-[#0A0A0A] flex flex-wrap items-center justify-center gap-x-[0.28em] gap-y-2">
+          <div className="space-y-5">
+            <div
+              className={`transition-all duration-700 ease-out ${
+                heroReady
+                  ? 'opacity-100 translate-y-0'
+                  : 'opacity-0 translate-y-3'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setRoadmapOpen(true)}
+                aria-label={`Open roadmap (${APP_VERSION})`}
+                className="min-h-[32px] px-3 py-1 rounded-xl border border-black/[0.1] bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#525252] hover:text-[#0A0A0A] transition-colors tabular-nums"
+              >
+                {APP_VERSION}
+              </button>
+            </div>
+
+            <h1 className="text-[clamp(2.75rem,8vw,6rem)] font-semibold tracking-tight leading-[1.04] text-[#0A0A0A] flex flex-wrap items-center justify-center gap-x-[0.28em] gap-y-2">
             {HERO_WORDS.map((word, index) => (
               <span
                 key={word}
@@ -86,6 +106,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
               </span>
             ))}
           </h1>
+          </div>
 
           <div
             style={{ transitionDelay: `${HERO_WORDS.length * 260 + 120}ms` }}
@@ -304,27 +325,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
       </section>
 
       {/* Footer & Relative Header */}
-      <footer className="border-t border-black/[0.08] bg-[#FAFAFA] py-6 px-4 sm:px-6">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#737373]">
-          <span>StartOrigin — Personal Gallery &amp; Visual Space</span>
-          <div className="flex items-center gap-6">
-            <button
-              type="button"
-              onClick={onGetStarted}
-              className="hover:text-[#0A0A0A] transition-colors whitespace-nowrap"
-            >
-              Create account
-            </button>
-            <button
-              type="button"
-              onClick={onExploreFeed}
-              className="hover:text-[#0A0A0A] transition-colors whitespace-nowrap"
-            >
-              Public feed
-            </button>
-          </div>
-        </div>
-      </footer>
+
 
       <header className="relative border-t border-black/[0.08] bg-white">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-6">
@@ -371,6 +372,8 @@ export const LandingView: React.FC<LandingViewProps> = ({
           </div>
         </div>
       </header>
+
+      <RoadmapModal isOpen={roadmapOpen} onClose={() => setRoadmapOpen(false)} />
     </div>
   );
 };
