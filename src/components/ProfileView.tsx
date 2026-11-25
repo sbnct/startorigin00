@@ -10,7 +10,9 @@ import {
   Link2,
   LogOut,
   Pencil,
+  Search,
   UserCheck,
+  UserMinus,
   UserPlus,
   UserX,
   Users,
@@ -26,6 +28,7 @@ import {
   SavedPhotoItem,
 } from '../types';
 import {
+  canAccessLimited,
   copyTextToClipboard,
   formatDate,
   formatRelativeTime,
@@ -59,6 +62,7 @@ interface ProfileViewProps {
   onOpenCinema: (photo: CinemaPhoto, collectionItems?: CinemaPhoto[]) => void;
   onOpenPost: (photoId: string) => void;
   onOpenCollection: (collectionId: string) => void;
+  onOpenProfile?: (userId: string) => void;
   onProfileUpdated: () => void;
   onRequireAuth: () => void;
   onSignOut?: () => void;
@@ -75,6 +79,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onOpenCinema,
   onOpenPost,
   onOpenCollection,
+  onOpenProfile,
   onProfileUpdated,
   onRequireAuth,
   onSignOut,
@@ -119,8 +124,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [subscriberActionId, setSubscriberActionId] = useState<string | null>(null);
   const [subscribersError, setSubscribersError] = useState<string | null>(null);
 
-  // Edit profile modal state
+  // Edit profile modal state (General | Following)
   const [editOpen, setEditOpen] = useState(false);
+  const [editTab, setEditTab] = useState<'general' | 'following'>('general');
   const [editName, setEditName] = useState('');
   const [editUsername, setEditUsername] = useState('');
   const [editBio, setEditBio] = useState('');
@@ -128,6 +134,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [editAvatarPreview, setEditAvatarPreview] = useState('');
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
+
+  // Following management tab inside Edit Profile
+  const [followingList, setFollowingList] = useState<
+    Array<{ id: string; name: string; username: string; avatar_url: string; is_verified?: boolean }>
+  >([]);
+  const [followingLoading, setFollowingLoading] = useState(false);
+  const [followingActionId, setFollowingActionId] = useState<string | null>(null);
+  const [followingError, setFollowingError] = useState<string | null>(null);
+  const [followingQuery, setFollowingQuery] = useState('');
 
   const loadProfileData = useCallback(async () => {
     if (!effectiveUserId) {
@@ -187,7 +202,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           .from('photos')
           .select('*')
           .eq('user_id', effectiveUserId)
-          .in('privacy', canSeeFollowersContent ? ['public', 'followers'] : ['public'])
+          .in('privacy', currentUserId ? ['public', 'followers', 'limited'] : ['public'])
           .order('created_at', { ascending: false }),
         supabase
           .from('collections')
@@ -220,12 +235,24 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       ]);
 
       setProfile((profData as Profile) || null);
-      setPublicPhotos((photosData as Photo[]) || []);
+      setPublicPhotos(
+        ((photosData as Photo[]) || []).filter((p) => {
+          if (p.privacy === 'public') return true;
+          if (p.privacy === 'followers') return canSeeFollowersContent;
+          if (p.privacy === 'limited') {
+            return canAccessLimited(effectiveUserId, p.allowed_user_ids, currentUserId);
+          }
+          return false;
+        })
+      );
       setPublicCollections(
         ((collectionsData as Collection[]) || []).filter((c) => {
           const priv = c.privacy || 'public';
           if (priv === 'public') return true;
           if (priv === 'followers') return canSeeFollowersContent;
+          if (priv === 'limited') {
+            return canAccessLimited(effectiveUserId, c.allowed_user_ids, currentUserId);
+          }
           return false;
         })
       );
@@ -242,6 +269,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           if (ph.privacy === 'public') return true;
           if (currentUserId && ph.user_id === currentUserId) return true;
           if (ph.privacy === 'followers' && myFollowingIds.has(ph.user_id)) return true;
+          if (
+            ph.privacy === 'limited' &&
+            canAccessLimited(ph.user_id, ph.allowed_user_ids, currentUserId)
+          ) {
+            return true;
+          }
           return false;
         })
       );
@@ -401,6 +434,30 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       }
     } finally {
       setSubscribersLoading(false);
+    }
+  }, [currentUserId, isOwnProfile]);
+
+  const loadFollowingModal = useCallback(async () => {
+    if (!currentUserId || !isOwnProfile) return;
+    setFollowingLoading(true);
+    setFollowingError(null);
+    try {
+      const { data: followRows, error: followErr } = await supabase
+        .from('subscriptions')
+        .select('target_user_id, profiles:target_user_id (id, name, username, avatar_url)')
+        .eq('subscriber_id', currentUserId)
+        .order('created_at', { ascending: false });
+
+      if (followErr) {
+        setFollowingError(followErr.message);
+      } else {
+        const parsed = (followRows || [])
+          .map((row: any) => row.profiles)
+          .filter(Boolean);
+        setFollowingList(parsed);
+      }
+    } finally {
+      setFollowingLoading(false);
     }
   }, [currentUserId, isOwnProfile]);
 
@@ -565,15 +622,45 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     }
   };
 
-  const openEditModal = () => {
+  const openEditModal = (initialTab: 'general' | 'following' = 'general') => {
     if (!profile) return;
+    setEditTab(initialTab);
     setEditName(profile.name);
     setEditUsername(profile.username);
     setEditBio(profile.bio || '');
     setEditAvatarPreview(profile.avatar_url || '');
     setEditAvatarFile(null);
     setEditError(null);
+    setFollowingQuery('');
+    setFollowingError(null);
     setEditOpen(true);
+    loadFollowingModal();
+  };
+
+  const handleUnfollowUser = async (targetUser: {
+    id: string;
+    name: string;
+    username: string;
+  }) => {
+    if (!currentUserId || followingActionId) return;
+    setFollowingActionId(targetUser.id);
+    setFollowingError(null);
+    try {
+      const { error } = await supabase
+        .from('subscriptions')
+        .delete()
+        .eq('subscriber_id', currentUserId)
+        .eq('target_user_id', targetUser.id);
+      if (error) {
+        setFollowingError(error.message);
+        return;
+      }
+      setFollowingList((prev) => prev.filter((u) => u.id !== targetUser.id));
+      onShowToast?.(`Unfollowed @${targetUser.username}`);
+      onProfileUpdated();
+    } finally {
+      setFollowingActionId(null);
+    }
   };
 
   const handleAvatarSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -719,10 +806,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               src={profile.avatar_url}
               alt={profile.name}
               referrerPolicy="no-referrer"
-              className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover border border-black/[0.08] shrink-0"
+              className="w-20 h-20 rounded-full object-cover border border-black/[0.08] shrink-0"
             />
           ) : (
-            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-[#0A0A0A] text-white text-xl font-semibold flex items-center justify-center shrink-0">
+            <div className="w-20 h-20 rounded-full bg-[#0A0A0A] text-white text-xl font-medium flex items-center justify-center shrink-0">
               {getInitials(profile.name)}
             </div>
           )}
@@ -730,7 +817,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           <div className="space-y-2 min-w-0">
             <div>
               <div className="flex items-center gap-1.5">
-                <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-[#0A0A0A]">
+                <h1 className="text-xl sm:text-2xl font-semibold text-[#0A0A0A] tracking-tight">
                   {profile.name}
                 </h1>
                 <VerifiedBadge
@@ -785,7 +872,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <PWAInstallButton compact />
               <button
                 type="button"
-                onClick={openEditModal}
+                onClick={() => openEditModal('general')}
                 className="min-h-[44px] px-5 py-2.5 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-2 transition-colors whitespace-nowrap"
               >
                 <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -1262,113 +1349,270 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       )}
 
-      {/* Edit Profile Modal */}
+      {/* Tabbed Edit Profile Modal (General | Following) */}
       {editOpen && (
         <div
           className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
           role="dialog"
           aria-modal="true"
+          aria-label="Edit Profile"
+          onClick={() => setEditOpen(false)}
         >
-          <form
-            onSubmit={handleSaveProfile}
-            className="w-full max-w-md bg-white border border-black/[0.08] rounded-3xl p-6 sm:p-7 space-y-5 shadow-2xl"
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-white text-[#0A0A0A] border border-black/[0.08] rounded-3xl p-5 sm:p-7 space-y-5 shadow-2xl"
           >
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-[#0A0A0A]">Edit Profile</h2>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold text-[#0A0A0A]">
+                Edit Profile
+              </h2>
               <button
                 type="button"
                 onClick={() => setEditOpen(false)}
                 aria-label="Close edit profile"
-                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-full hover:bg-[#F5F5F7]"
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-full hover:bg-[#F5F5F7] text-[#0A0A0A] transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {editError && (
-              <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
-                {editError}
-              </div>
+            {/* Modal Tabs: General | Following */}
+            <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-[#F5F5F7]">
+              {(
+                [
+                  { id: 'general', label: 'General' },
+                  { id: 'following', label: 'Following' },
+                ] as const
+              ).map((tab) => {
+                const active = editTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setEditTab(tab.id)}
+                    className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
+                      active
+                        ? 'bg-white text-[#0A0A0A] shadow-xs'
+                        : 'text-[#737373] hover:text-[#0A0A0A]'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Tab 1: General */}
+            {editTab === 'general' && (
+              <form onSubmit={handleSaveProfile} className="space-y-4">
+                {editError && (
+                  <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
+                    {editError}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-4">
+                  {editAvatarPreview ? (
+                    <img
+                      src={editAvatarPreview}
+                      alt={editName}
+                      className="w-16 h-16 rounded-full object-cover border border-black/[0.08]"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded-full bg-[#0A0A0A] text-white text-base font-medium flex items-center justify-center">
+                      {getInitials(editName)}
+                    </div>
+                  )}
+
+                  <label className="min-h-[40px] px-4 py-2 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#0A0A0A] cursor-pointer inline-flex items-center">
+                    <span>Change Avatar</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAvatarSelected}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    value={editUsername}
+                    onChange={(e) => setEditUsername(e.target.value)}
+                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
+                    Bio
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={editBio}
+                    onChange={(e) => setEditBio(e.target.value)}
+                    placeholder="Tell others about your photography..."
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm resize-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditOpen(false)}
+                    className="min-h-[44px] px-4 py-2 rounded-xl text-xs font-medium text-[#525252] hover:bg-[#F5F5F7]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={editSaving}
+                    className="min-h-[44px] px-5 py-2 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium hover:bg-black/85 disabled:opacity-50"
+                  >
+                    {editSaving ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
             )}
 
-            <div className="flex items-center gap-4">
-              {editAvatarPreview ? (
-                <img
-                  src={editAvatarPreview}
-                  alt={editName}
-                  className="w-16 h-16 rounded-full object-cover border border-black/[0.08]"
-                />
-              ) : (
-                <div className="w-16 h-16 rounded-full bg-[#0A0A0A] text-white text-base font-medium flex items-center justify-center">
-                  {getInitials(editName)}
+            {/* Tab 2: Following */}
+            {editTab === 'following' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-[#737373]">
+                    Manage who you follow on StartOrigin.
+                  </p>
+                  <span className="text-xs text-[#737373] tabular-nums">
+                    {followingList.length}
+                  </span>
                 </div>
-              )}
 
-              <label className="min-h-[40px] px-4 py-2 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#0A0A0A] cursor-pointer inline-flex items-center">
-                <span>Change Avatar</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleAvatarSelected}
-                  className="hidden"
-                />
-              </label>
-            </div>
+                <div className="relative">
+                  <Search
+                    className="w-3.5 h-3.5 text-[#737373] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                    strokeWidth={1.75}
+                  />
+                  <input
+                    type="text"
+                    value={followingQuery}
+                    onChange={(e) => setFollowingQuery(e.target.value)}
+                    placeholder="Search..."
+                    className="w-full min-h-[40px] pl-9 pr-3 py-2 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-xs"
+                  />
+                </div>
 
-            <div>
-              <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
-                Name
-              </label>
-              <input
-                type="text"
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
-              />
-            </div>
+                {followingError && (
+                  <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
+                    {followingError}
+                  </div>
+                )}
 
-            <div>
-              <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
-                Username
-              </label>
-              <input
-                type="text"
-                value={editUsername}
-                onChange={(e) => setEditUsername(e.target.value)}
-                className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
-              />
-            </div>
+                <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+                  {followingLoading ? (
+                    <div className="py-10 text-center text-xs text-[#737373]">
+                      Loading...
+                    </div>
+                  ) : (
+                    (() => {
+                      const q = followingQuery.trim().toLowerCase().replace(/^@/, '');
+                      const filtered = followingList.filter(
+                        (u) =>
+                          !q ||
+                          u.name.toLowerCase().includes(q) ||
+                          u.username.toLowerCase().includes(q)
+                      );
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="py-10 text-center rounded-2xl border border-black/[0.06] bg-[#FAFAFA]">
+                            <Users
+                              className="w-6 h-6 mx-auto text-[#737373] mb-2"
+                              strokeWidth={1.5}
+                            />
+                            <p className="text-xs text-[#737373]">
+                              {followingList.length === 0
+                                ? 'You are not following anyone yet.'
+                                : 'No matching creators found.'}
+                            </p>
+                          </div>
+                        );
+                      }
+                      return filtered.map((u) => {
+                        const busy = followingActionId === u.id;
+                        return (
+                          <div
+                            key={u.id}
+                            className="p-3 rounded-2xl border border-black/[0.08] bg-white flex items-center justify-between gap-3"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditOpen(false);
+                                onOpenProfile?.(u.id);
+                              }}
+                              className="flex items-center gap-2.5 min-w-0 flex-1 text-left group"
+                            >
+                              {u.avatar_url ? (
+                                <img
+                                  src={u.avatar_url}
+                                  alt={u.name}
+                                  referrerPolicy="no-referrer"
+                                  className="w-9 h-9 rounded-full object-cover border border-black/[0.08] shrink-0"
+                                />
+                              ) : (
+                                <span className="w-9 h-9 rounded-full bg-[#0A0A0A] text-white text-xs font-medium flex items-center justify-center shrink-0">
+                                  {getInitials(u.name)}
+                                </span>
+                              )}
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1">
+                                  <p className="text-xs font-semibold text-[#0A0A0A] truncate group-hover:underline">
+                                    {u.name}
+                                  </p>
+                                  <VerifiedBadge
+                                    username={u.username}
+                                    isVerified={u.is_verified}
+                                  />
+                                </div>
+                                <p className="text-[11px] text-[#737373] truncate">
+                                  @{u.username}
+                                </p>
+                              </div>
+                            </button>
 
-            <div>
-              <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
-                Bio
-              </label>
-              <textarea
-                rows={3}
-                value={editBio}
-                onChange={(e) => setEditBio(e.target.value)}
-                placeholder="Tell others about your photography..."
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm resize-none"
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setEditOpen(false)}
-                className="min-h-[44px] px-4 py-2 rounded-xl text-xs font-medium text-[#525252] hover:bg-[#F5F5F7]"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={editSaving}
-                className="min-h-[44px] px-5 py-2 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium hover:bg-black/85 disabled:opacity-50"
-              >
-                {editSaving ? 'Saving...' : 'Save Changes'}
-              </button>
-            </div>
-          </form>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => handleUnfollowUser(u)}
+                              className="min-h-[34px] px-3 py-1.5 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-[11px] font-medium text-[#0A0A0A] inline-flex items-center gap-1.5 transition-colors disabled:opacity-40 shrink-0"
+                            >
+                              <UserMinus className="w-3.5 h-3.5" />
+                              <span>Unfollow</span>
+                            </button>
+                          </div>
+                        );
+                      });
+                    })()
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1449,7 +1693,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         key={subUser.id}
                         className="p-3 rounded-2xl border border-black/[0.08] bg-white flex items-center justify-between gap-3"
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSubscribersModalOpen(false);
+                            onOpenProfile?.(subUser.id);
+                          }}
+                          className="flex items-center gap-2.5 min-w-0 flex-1 text-left group"
+                        >
                           {subUser.avatar_url ? (
                             <img
                               src={subUser.avatar_url}
@@ -1464,7 +1715,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                           )}
                           <div className="min-w-0">
                             <div className="flex items-center gap-1">
-                              <p className="text-xs font-semibold text-[#0A0A0A] truncate">
+                              <p className="text-xs font-semibold text-[#0A0A0A] truncate group-hover:underline">
                                 {subUser.name}
                               </p>
                               <VerifiedBadge username={subUser.username} />
@@ -1473,7 +1724,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                               @{subUser.username}
                             </p>
                           </div>
-                        </div>
+                        </button>
 
                         <div className="flex items-center gap-1.5 shrink-0">
                           <button
@@ -1512,7 +1763,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       key={user.id}
                       className="p-3 rounded-2xl border border-black/[0.08] bg-white flex items-center justify-between gap-3"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSubscribersModalOpen(false);
+                          onOpenProfile?.(user.id);
+                        }}
+                        className="flex items-center gap-2.5 min-w-0 flex-1 text-left group"
+                      >
                         {user.avatar_url ? (
                           <img
                             src={user.avatar_url}
@@ -1527,7 +1785,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         )}
                         <div className="min-w-0">
                           <div className="flex items-center gap-1">
-                            <p className="text-xs font-semibold text-[#0A0A0A] truncate">
+                            <p className="text-xs font-semibold text-[#0A0A0A] truncate group-hover:underline">
                               {user.name}
                             </p>
                             <VerifiedBadge username={user.username} />
@@ -1536,7 +1794,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                             @{user.username}
                           </p>
                         </div>
-                      </div>
+                      </button>
 
                       <button
                         type="button"

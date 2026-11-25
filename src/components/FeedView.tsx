@@ -3,6 +3,7 @@ import { Check, Compass, Info, Link2, RefreshCw, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { CinemaPhoto, PhotoWithAuthor } from '../types';
 import {
+  canAccessLimited,
   copyTextToClipboard,
   formatDate,
   getInitials,
@@ -86,7 +87,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
             profiles:user_id (id, name, username, avatar_url)
           `
           )
-          .in('privacy', ['public', 'followers'])
+          .in('privacy', ['public', 'followers', 'limited'])
           .in('user_id', followedIds)
           .order('created_at', { ascending: false })
           .limit(60);
@@ -96,7 +97,12 @@ export const FeedView: React.FC<FeedViewProps> = ({
           return;
         }
 
-        setPhotos((data as PhotoWithAuthor[]) || []);
+        const filtered = ((data as PhotoWithAuthor[]) || []).filter(
+          (p) =>
+            p.privacy !== 'limited' ||
+            canAccessLimited(p.user_id, p.allowed_user_ids, currentUserId)
+        );
+        setPhotos(filtered);
         return;
       }
 
@@ -434,7 +440,11 @@ export const FeedView: React.FC<FeedViewProps> = ({
                   )}
 
                   <span className="tabular-nums shrink-0">
-                    {photo.privacy === 'followers' ? 'Followers · ' : ''}
+                    {photo.privacy === 'followers'
+                      ? 'Followers · '
+                      : photo.privacy === 'limited'
+                      ? 'Limited · '
+                      : ''}
                     {formatDate(photo.photo_date || photo.created_at)}
                   </span>
                 </div>

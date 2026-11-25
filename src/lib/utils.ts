@@ -91,6 +91,16 @@ export function getVisibilityLabel(privacy?: string | null): string {
   if (privacy === 'private') return 'Private';
   if (privacy === 'unlisted') return 'By Link';
   if (privacy === 'followers') return 'Followers';
+  if (privacy === 'limited') return 'Limited';
   return 'Public';
 }
 
+export function canAccessLimited(
+  ownerId: string,
+  allowedUserIds: string[] | null | undefined,
+  viewerId: string | null
+): boolean {
+  if (!viewerId) return false;
+  if (viewerId === ownerId) return true;
+  return Array.isArray(allowedUserIds) && allowedUserIds.includes(viewerId);
+}

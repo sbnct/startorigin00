@@ -8,6 +8,7 @@ import {
   Link2,
   Lock,
   Plus,
+  UserCheck,
   Users,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -19,6 +20,7 @@ import {
   Profile,
 } from '../types';
 import {
+  canAccessLimited,
   copyTextToClipboard,
   formatDate,
   getCollectionShareUrl,
@@ -116,6 +118,15 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
         return;
       }
 
+      if (
+        colPrivacy === 'limited' &&
+        !canAccessLimited(typedCol.user_id, typedCol.allowed_user_ids, currentUserId)
+      ) {
+        setCollection(null);
+        setPhotos([]);
+        return;
+      }
+
       setCollection(typedCol);
 
       let query = supabase
@@ -130,23 +141,24 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
         .order('created_at', { ascending: false });
 
       if (!isOwner) {
-        if (isFollower) {
-          if (colPrivacy === 'unlisted') {
-            query = query.in('privacy', ['public', 'followers', 'unlisted']);
-          } else {
-            query = query.in('privacy', ['public', 'followers']);
-          }
-        } else {
-          if (colPrivacy === 'unlisted') {
-            query = query.in('privacy', ['public', 'unlisted']);
-          } else {
-            query = query.eq('privacy', 'public');
-          }
-        }
+        const allowedPrivacies: string[] = ['public', 'limited'];
+        if (isFollower) allowedPrivacies.push('followers');
+        if (colPrivacy === 'unlisted') allowedPrivacies.push('unlisted');
+        query = query.in('privacy', allowedPrivacies);
       }
 
       const { data: photoRows } = await query;
-      setPhotos((photoRows as PhotoWithAuthor[]) || []);
+      const filteredRows = ((photoRows as PhotoWithAuthor[]) || []).filter((p) => {
+        if (isOwner) return true;
+        if (p.privacy === 'public') return true;
+        if (p.privacy === 'unlisted') return colPrivacy === 'unlisted';
+        if (p.privacy === 'followers') return isFollower;
+        if (p.privacy === 'limited') {
+          return canAccessLimited(p.user_id, p.allowed_user_ids, currentUserId);
+        }
+        return false;
+      });
+      setPhotos(filteredRows);
 
       if (currentUserId && typedCol.user_id === currentUserId) {
         const { data: myCols } = await supabase
@@ -269,7 +281,7 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
           <span>Go Back</span>
         </button>
         <p className="text-sm text-[#737373]">
-          This collection is private, for followers only, or unavailable.
+          This collection is private, limited, for followers only, or unavailable.
         </p>
         {!currentUserId && (
           <button
@@ -348,6 +360,8 @@ export const CollectionView: React.FC<CollectionViewProps> = ({
               <Link2 className="w-3 h-3" strokeWidth={1.75} />
             ) : colPrivacy === 'followers' ? (
               <Users className="w-3 h-3" strokeWidth={1.75} />
+            ) : colPrivacy === 'limited' ? (
+              <UserCheck className="w-3 h-3" strokeWidth={1.75} />
             ) : (
               <Globe className="w-3 h-3" strokeWidth={1.75} />
             )}

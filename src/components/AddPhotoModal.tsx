@@ -12,6 +12,7 @@ import {
   syncUploadCooldownFromServer,
 } from '../lib/uploadGuard';
 import { RulesModal } from './RulesModal';
+import { LimitedUsersPicker } from './LimitedUsersPicker';
 
 interface AddPhotoModalProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ interface PendingPhotoItem {
   previewUrl: string;
   title: string;
   privacy: PhotoPrivacy;
+  allowedUserIds: string[];
   collectionId: string;
   tagsText: string;
 }
@@ -44,6 +46,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
   const [useUnified, setUseUnified] = useState(true);
   const [unifiedTitle, setUnifiedTitle] = useState('');
   const [unifiedPrivacy, setUnifiedPrivacy] = useState<PhotoPrivacy>('public');
+  const [unifiedAllowedIds, setUnifiedAllowedIds] = useState<string[]>([]);
   const [unifiedCollectionId, setUnifiedCollectionId] = useState(defaultCollectionId);
   const [unifiedTags, setUnifiedTags] = useState('');
   const [fileLimitNotice, setFileLimitNotice] = useState<string | null>(null);
@@ -86,6 +89,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
     setItems([]);
     setUnifiedTitle('');
     setUnifiedTags('');
+    setUnifiedAllowedIds([]);
     setFileLimitNotice(null);
     setError(null);
     onClose();
@@ -114,6 +118,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
         previewUrl: URL.createObjectURL(file),
         title: baseName || `Photo ${items.length + index + 1}`,
         privacy: 'public' as PhotoPrivacy,
+        allowedUserIds: [],
         collectionId: defaultCollectionId,
         tagsText: '',
       };
@@ -153,6 +158,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
         image_url: string;
         storage_path: string;
         privacy: PhotoPrivacy;
+        allowed_user_ids: string[];
         tags: string[];
         photo_date: string;
       }[] = [];
@@ -186,6 +192,12 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
           : item.title.trim();
 
         const resolvedPrivacy = useUnified ? unifiedPrivacy : item.privacy;
+        const resolvedAllowedIds =
+          resolvedPrivacy === 'limited'
+            ? useUnified
+              ? unifiedAllowedIds
+              : item.allowedUserIds
+            : [];
         const resolvedCollectionId = useUnified
           ? unifiedCollectionId || null
           : item.collectionId || null;
@@ -198,12 +210,24 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
           image_url: urlData.publicUrl,
           storage_path: storagePath,
           privacy: resolvedPrivacy,
+          allowed_user_ids: resolvedAllowedIds,
           tags: resolvedTags,
           photo_date: today,
         });
       }
 
-      const { error: insertErr } = await supabase.from('photos').insert(uploadedRows);
+      let { error: insertErr } = await supabase.from('photos').insert(uploadedRows);
+      if (
+        insertErr &&
+        insertErr.message?.toLowerCase().includes('allowed_user_ids') &&
+        uploadedRows.every((r) => r.privacy !== 'limited')
+      ) {
+        const fallbackRows = uploadedRows.map(
+          ({ allowed_user_ids: _ignored, ...rest }) => rest
+        );
+        const retry = await supabase.from('photos').insert(fallbackRows);
+        insertErr = retry.error;
+      }
       if (insertErr) {
         throw new Error(insertErr.message);
       }
@@ -238,6 +262,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       setItems([]);
       setUnifiedTitle('');
       setUnifiedTags('');
+      setUnifiedAllowedIds([]);
       setFileLimitNotice(null);
       onSuccess(uploadedRows.length, destinationLabel);
       onClose();
@@ -427,6 +452,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                 >
                   <option value="public">Public (Feed &amp; Profile)</option>
                   <option value="followers">Followers (Only subscribers)</option>
+                  <option value="limited">Limited (Only chosen users)</option>
                   <option value="unlisted">By Link (Only via shared link)</option>
                   <option value="private">Private (Gallery only)</option>
                 </select>
@@ -450,6 +476,15 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                 </select>
               </div>
             </div>
+
+            {unifiedPrivacy === 'limited' && (
+              <LimitedUsersPicker
+                compact
+                currentUserId={currentUserId}
+                selectedUserIds={unifiedAllowedIds}
+                onChange={setUnifiedAllowedIds}
+              />
+            )}
 
             <div>
               <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
@@ -520,6 +555,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                     >
                       <option value="public">Public</option>
                       <option value="followers">Followers</option>
+                      <option value="limited">Limited</option>
                       <option value="unlisted">By Link</option>
                       <option value="private">Private</option>
                     </select>
@@ -549,6 +585,17 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                       className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-black/[0.08] text-base md:text-xs"
                     />
                   </div>
+
+                  {item.privacy === 'limited' && (
+                    <LimitedUsersPicker
+                      compact
+                      currentUserId={currentUserId}
+                      selectedUserIds={item.allowedUserIds}
+                      onChange={(nextIds) =>
+                        updatePendingItem(item.id, { allowedUserIds: nextIds })
+                      }
+                    />
+                  )}
                 </div>
               ))
             )}

@@ -3,6 +3,7 @@ import { ArrowLeft, Bookmark, Check, ChevronRight, Flag, Folder, Heart, Link2, M
 import { supabase } from '../lib/supabase';
 import { CinemaPhoto, PhotoWithAuthor } from '../types';
 import {
+  canAccessLimited,
   copyTextToClipboard,
   formatDate,
   getInitials,
@@ -95,6 +96,15 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
       }
 
       if (typedPhoto.privacy === 'followers' && !isOwner && !isFollower) {
+        setPhoto(null);
+        setLoading(false);
+        return;
+      }
+
+      if (
+        typedPhoto.privacy === 'limited' &&
+        !canAccessLimited(typedPhoto.user_id, typedPhoto.allowed_user_ids, currentUserId)
+      ) {
         setPhoto(null);
         setLoading(false);
         return;
@@ -348,7 +358,7 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
           <span>Go Back</span>
         </button>
         <p className="text-sm text-[#737373]">
-          This photo is private, for followers only, or unavailable.
+          This photo is private, limited, for followers only, or unavailable.
         </p>
       </div>
     );
@@ -419,7 +429,13 @@ export const PostPageView: React.FC<PostPageViewProps> = ({
             {photo.collections &&
               ((photo.collections.privacy || 'public') === 'public' ||
                 (photo.collections.privacy === 'followers' &&
-                  canSeeFollowersCollection)) && (
+                  canSeeFollowersCollection) ||
+                (photo.collections.privacy === 'limited' &&
+                  canAccessLimited(
+                    photo.user_id,
+                    photo.collections.allowed_user_ids,
+                    currentUserId
+                  ))) && (
                 <>
                   <span aria-hidden="true">·</span>
                   <button

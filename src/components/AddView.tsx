@@ -28,6 +28,7 @@ import {
 } from '../lib/uploadGuard';
 import { AuthView } from './AuthView';
 import { RulesModal } from './RulesModal';
+import { LimitedUsersPicker } from './LimitedUsersPicker';
 
 interface AddViewProps {
   currentUserId: string | null;
@@ -43,6 +44,7 @@ interface PendingPhotoItem {
   previewUrl: string;
   title: string;
   privacy: PhotoPrivacy;
+  allowedUserIds: string[];
   collectionId: string;
   tagsText: string;
 }
@@ -62,6 +64,7 @@ export const AddView: React.FC<AddViewProps> = ({
   const [useUnified, setUseUnified] = useState(true);
   const [unifiedTitle, setUnifiedTitle] = useState('');
   const [unifiedPrivacy, setUnifiedPrivacy] = useState<PhotoPrivacy>('public');
+  const [unifiedAllowedIds, setUnifiedAllowedIds] = useState<string[]>([]);
   const [unifiedCollectionId, setUnifiedCollectionId] = useState('');
   const [unifiedTags, setUnifiedTags] = useState('');
   const [fileLimitNotice, setFileLimitNotice] = useState<string | null>(null);
@@ -69,6 +72,7 @@ export const AddView: React.FC<AddViewProps> = ({
   // Add Collection state
   const [collectionName, setCollectionName] = useState('');
   const [collectionPrivacy, setCollectionPrivacy] = useState<CollectionPrivacy>('public');
+  const [collectionAllowedIds, setCollectionAllowedIds] = useState<string[]>([]);
   const [createdCollection, setCreatedCollection] = useState<{
     id: string;
     privacy: CollectionPrivacy;
@@ -153,6 +157,7 @@ export const AddView: React.FC<AddViewProps> = ({
         previewUrl: URL.createObjectURL(file),
         title: baseName || `Photo ${items.length + index + 1}`,
         privacy: 'public' as PhotoPrivacy,
+        allowedUserIds: [],
         collectionId: '',
         tagsText: '',
       };
@@ -192,6 +197,7 @@ export const AddView: React.FC<AddViewProps> = ({
         image_url: string;
         storage_path: string;
         privacy: PhotoPrivacy;
+        allowed_user_ids: string[];
         tags: string[];
         photo_date: string;
       }[] = [];
@@ -227,6 +233,12 @@ export const AddView: React.FC<AddViewProps> = ({
           : item.title.trim();
 
         const resolvedPrivacy = useUnified ? unifiedPrivacy : item.privacy;
+        const resolvedAllowedIds =
+          resolvedPrivacy === 'limited'
+            ? useUnified
+              ? unifiedAllowedIds
+              : item.allowedUserIds
+            : [];
         const resolvedCollectionId = useUnified
           ? unifiedCollectionId || null
           : item.collectionId || null;
@@ -239,12 +251,24 @@ export const AddView: React.FC<AddViewProps> = ({
           image_url: urlData.publicUrl,
           storage_path: storagePath,
           privacy: resolvedPrivacy,
+          allowed_user_ids: resolvedAllowedIds,
           tags: resolvedTags,
           photo_date: today,
         });
       }
 
-      const { error: insertErr } = await supabase.from('photos').insert(uploadedRows);
+      let { error: insertErr } = await supabase.from('photos').insert(uploadedRows);
+      if (
+        insertErr &&
+        insertErr.message?.toLowerCase().includes('allowed_user_ids') &&
+        uploadedRows.every((r) => r.privacy !== 'limited')
+      ) {
+        const fallbackRows = uploadedRows.map(
+          ({ allowed_user_ids: _ignored, ...rest }) => rest
+        );
+        const retry = await supabase.from('photos').insert(fallbackRows);
+        insertErr = retry.error;
+      }
       if (insertErr) {
         throw new Error(insertErr.message);
       }
@@ -281,6 +305,7 @@ export const AddView: React.FC<AddViewProps> = ({
       setItems([]);
       setUnifiedTitle('');
       setUnifiedTags('');
+      setUnifiedAllowedIds([]);
       setFileLimitNotice(null);
       onDataChanged();
       onShowToast?.(successMsg);
@@ -344,15 +369,35 @@ export const AddView: React.FC<AddViewProps> = ({
 
     setSubmitting(true);
     try {
+      const colPayload: Record<string, unknown> = {
+        user_id: currentUserId,
+        name: trimmed,
+        privacy: collectionPrivacy,
+        allowed_user_ids: collectionPrivacy === 'limited' ? collectionAllowedIds : [],
+      };
       let { data: created, error: createErr } = await supabase
         .from('collections')
-        .insert({
-          user_id: currentUserId,
-          name: trimmed,
-          privacy: collectionPrivacy,
-        })
+        .insert(colPayload)
         .select()
         .single();
+
+      if (
+        createErr &&
+        createErr.message?.toLowerCase().includes('allowed_user_ids') &&
+        collectionPrivacy !== 'limited'
+      ) {
+        const retry = await supabase
+          .from('collections')
+          .insert({
+            user_id: currentUserId,
+            name: trimmed,
+            privacy: collectionPrivacy,
+          })
+          .select()
+          .single();
+        created = retry.data;
+        createErr = retry.error;
+      }
 
       if (
         createErr &&
@@ -390,6 +435,7 @@ export const AddView: React.FC<AddViewProps> = ({
 
       setCollectionName('');
       setCollectionPrivacy('public');
+      setCollectionAllowedIds([]);
       onDataChanged();
       onShowToast?.(`Collection "${trimmed}" created.`);
       onNavigateGallery();
@@ -601,10 +647,19 @@ export const AddView: React.FC<AddViewProps> = ({
               >
                 <option value="public">Public (Visible on Profile &amp; Photo Pages)</option>
                 <option value="followers">Followers (Only visible to your subscribers)</option>
+                <option value="limited">Limited (Only chosen users)</option>
                 <option value="unlisted">By Link (Only viewable with copied link)</option>
                 <option value="private">Private (Gallery only)</option>
               </select>
             </div>
+
+            {collectionPrivacy === 'limited' && (
+              <LimitedUsersPicker
+                currentUserId={currentUserId}
+                selectedUserIds={collectionAllowedIds}
+                onChange={setCollectionAllowedIds}
+              />
+            )}
 
             <button
               type="submit"
@@ -736,6 +791,7 @@ export const AddView: React.FC<AddViewProps> = ({
                     >
                       <option value="public">Public (Feed &amp; Profile)</option>
                       <option value="followers">Followers (Only subscribers)</option>
+                      <option value="limited">Limited (Only chosen users)</option>
                       <option value="unlisted">By Link (Only via shared link)</option>
                       <option value="private">Private (Gallery only)</option>
                     </select>
@@ -759,6 +815,14 @@ export const AddView: React.FC<AddViewProps> = ({
                     </select>
                   </div>
                 </div>
+
+                {unifiedPrivacy === 'limited' && (
+                  <LimitedUsersPicker
+                    currentUserId={currentUserId}
+                    selectedUserIds={unifiedAllowedIds}
+                    onChange={setUnifiedAllowedIds}
+                  />
+                )}
 
                 <div>
                   <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
@@ -830,6 +894,7 @@ export const AddView: React.FC<AddViewProps> = ({
                         >
                           <option value="public">Public</option>
                           <option value="followers">Followers</option>
+                          <option value="limited">Limited</option>
                           <option value="unlisted">By Link</option>
                           <option value="private">Private</option>
                         </select>
@@ -859,6 +924,17 @@ export const AddView: React.FC<AddViewProps> = ({
                           className="min-h-[40px] px-3 py-2 rounded-xl bg-white border border-black/[0.08] text-base md:text-xs"
                         />
                       </div>
+
+                      {item.privacy === 'limited' && (
+                        <LimitedUsersPicker
+                          compact
+                          currentUserId={currentUserId}
+                          selectedUserIds={item.allowedUserIds}
+                          onChange={(nextIds) =>
+                            updatePendingItem(item.id, { allowedUserIds: nextIds })
+                          }
+                        />
+                      )}
                     </div>
                   ))
                 )}

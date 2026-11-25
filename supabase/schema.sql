@@ -33,20 +33,24 @@ CREATE TABLE IF NOT EXISTS public.collections (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   name text NOT NULL,
-  privacy text NOT NULL DEFAULT 'public' CHECK (privacy IN ('public', 'followers', 'unlisted', 'private')),
+  privacy text NOT NULL DEFAULT 'public' CHECK (privacy IN ('public', 'followers', 'limited', 'unlisted', 'private')),
+  allowed_user_ids uuid[] NOT NULL DEFAULT '{}',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE public.collections
   ADD COLUMN IF NOT EXISTS privacy text NOT NULL DEFAULT 'public';
+ALTER TABLE public.collections
+  ADD COLUMN IF NOT EXISTS allowed_user_ids uuid[] NOT NULL DEFAULT '{}';
 
 ALTER TABLE public.collections
   DROP CONSTRAINT IF EXISTS collections_privacy_check;
 ALTER TABLE public.collections
-  ADD CONSTRAINT collections_privacy_check CHECK (privacy IN ('public', 'followers', 'unlisted', 'private'));
+  ADD CONSTRAINT collections_privacy_check CHECK (privacy IN ('public', 'followers', 'limited', 'unlisted', 'private'));
 
 CREATE INDEX IF NOT EXISTS collections_user_id_idx ON public.collections (user_id);
+CREATE INDEX IF NOT EXISTS collections_allowed_users_gin_idx ON public.collections USING GIN (allowed_user_ids);
 
 CREATE TABLE IF NOT EXISTS public.photos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -55,21 +59,26 @@ CREATE TABLE IF NOT EXISTS public.photos (
   title text NOT NULL,
   image_url text NOT NULL,
   storage_path text,
-  privacy text NOT NULL DEFAULT 'public' CHECK (privacy IN ('public', 'followers', 'unlisted', 'private')),
+  privacy text NOT NULL DEFAULT 'public' CHECK (privacy IN ('public', 'followers', 'limited', 'unlisted', 'private')),
+  allowed_user_ids uuid[] NOT NULL DEFAULT '{}',
   tags text[] NOT NULL DEFAULT '{}',
   photo_date date NOT NULL DEFAULT CURRENT_DATE,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
 ALTER TABLE public.photos
+  ADD COLUMN IF NOT EXISTS allowed_user_ids uuid[] NOT NULL DEFAULT '{}';
+
+ALTER TABLE public.photos
   DROP CONSTRAINT IF EXISTS photos_privacy_check;
 ALTER TABLE public.photos
-  ADD CONSTRAINT photos_privacy_check CHECK (privacy IN ('public', 'followers', 'unlisted', 'private'));
+  ADD CONSTRAINT photos_privacy_check CHECK (privacy IN ('public', 'followers', 'limited', 'unlisted', 'private'));
 
 CREATE INDEX IF NOT EXISTS photos_user_id_idx ON public.photos (user_id);
 CREATE INDEX IF NOT EXISTS photos_collection_id_idx ON public.photos (collection_id);
 CREATE INDEX IF NOT EXISTS photos_privacy_created_idx ON public.photos (privacy, created_at DESC);
 CREATE INDEX IF NOT EXISTS photos_tags_gin_idx ON public.photos USING GIN (tags);
+CREATE INDEX IF NOT EXISTS photos_allowed_users_gin_idx ON public.photos USING GIN (allowed_user_ids);
 
 CREATE TABLE IF NOT EXISTS public.photo_likes (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -293,6 +302,11 @@ CREATE POLICY "Users can view own or public collections"
           AND s.target_user_id = collections.user_id
       )
     )
+    OR (
+      privacy = 'limited'
+      AND auth.uid() IS NOT NULL
+      AND auth.uid() = ANY(allowed_user_ids)
+    )
   );
 
 DROP POLICY IF EXISTS "Users can create own collections" ON public.collections;
@@ -327,6 +341,11 @@ CREATE POLICY "Public photos are viewable by all; private by owner"
         WHERE s.subscriber_id = auth.uid()
           AND s.target_user_id = photos.user_id
       )
+    )
+    OR (
+      privacy = 'limited'
+      AND auth.uid() IS NOT NULL
+      AND auth.uid() = ANY(allowed_user_ids)
     )
   );
 

@@ -1,18 +1,29 @@
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 
-export const APP_VERSION = 'v1.01';
+export const APP_VERSION = 'v1.02';
 
 interface RoadmapRelease {
   version: string;
+  date: string;
   latest?: boolean;
   items: string[];
 }
 
 const RELEASES: RoadmapRelease[] = [
   {
-    version: 'v1.01',
+    version: 'v1.02',
+    date: '25 Nov 2026',
     latest: true,
+    items: [
+      'Added new privacy setting for photos and collections',
+      "Added following control in 'Edit Profile'",
+      'Minor improvements',
+    ],
+  },
+  {
+    version: 'v1.01',
+    date: '22 Nov 2026',
     items: [
       'Landing page improved',
       'Added new privacy option in Gallery',
@@ -22,6 +33,7 @@ const RELEASES: RoadmapRelease[] = [
   },
   {
     version: 'v1.0',
+    date: '19 Nov 2026',
     items: ['App released!'],
   },
 ];
@@ -53,9 +65,9 @@ export const RoadmapModal: React.FC<RoadmapModalProps> = ({ isOpen, onClose }) =
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md bg-white border border-black/[0.08] rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5"
+        className="w-full max-w-md max-h-[85vh] flex flex-col bg-white border border-black/[0.08] rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5"
       >
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 shrink-0">
           <div>
             <h2 className="text-lg font-semibold tracking-tight text-[#0A0A0A]">
               Roadmap
@@ -74,21 +86,26 @@ export const RoadmapModal: React.FC<RoadmapModalProps> = ({ isOpen, onClose }) =
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-4 overflow-y-auto pr-0.5">
           {RELEASES.map((release) => (
             <section
               key={release.version}
               className="p-4 rounded-2xl border border-black/[0.08] bg-[#FAFAFA] space-y-2.5"
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold text-[#0A0A0A] tabular-nums">
-                  {release.version}
-                </span>
-                {release.latest && (
-                  <span className="text-[11px] font-medium text-[#525252]">
-                    Latest
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-[#0A0A0A] tabular-nums">
+                    {release.version}
                   </span>
-                )}
+                  {release.latest && (
+                    <span className="text-[11px] font-medium text-[#525252]">
+                      Latest
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] text-[#737373] tabular-nums">
+                  {release.date}
+                </span>
               </div>
 
               <ul className="space-y-1.5 text-xs sm:text-sm text-[#404040]">

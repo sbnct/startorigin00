@@ -427,6 +427,7 @@ function AppContent() {
           onOpenCinema={openCinema}
           onOpenPost={handleOpenPost}
           onOpenCollection={handleOpenCollection}
+          onOpenProfile={handleOpenProfile}
           onProfileUpdated={() => {
             loadCurrentProfile(session);
             bumpRefresh();
@@ -503,6 +504,7 @@ function AppContent() {
             onOpenCinema={openCinema}
             onOpenPost={handleOpenPost}
             onOpenCollection={handleOpenCollection}
+            onOpenProfile={handleOpenProfile}
             onProfileUpdated={() => {
               loadCurrentProfile(session);
               bumpRefresh();

@@ -14,6 +14,7 @@ import {
   Plus,
   Search,
   Trash2,
+  UserCheck,
   Users,
   X,
 } from 'lucide-react';
@@ -37,6 +38,7 @@ import { AuthView } from './AuthView';
 import { ResilientImage } from './ResilientImage';
 import { AddPhotoModal } from './AddPhotoModal';
 import { RulesModal } from './RulesModal';
+import { LimitedUsersPicker } from './LimitedUsersPicker';
 
 interface GalleryViewProps {
   currentUserId: string | null;
@@ -75,12 +77,14 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   const [moveCollectionId, setMoveCollectionId] = useState<string>('');
   const [photoPrivacyTarget, setPhotoPrivacyTarget] = useState<Photo | null>(null);
   const [photoPrivacyValue, setPhotoPrivacyValue] = useState<PhotoPrivacy>('public');
+  const [photoAllowedIds, setPhotoAllowedIds] = useState<string[]>([]);
 
   // Collection action modals
   const [colRenameTarget, setColRenameTarget] = useState<Collection | null>(null);
   const [colRenameValue, setColRenameValue] = useState('');
   const [colPrivacyTarget, setColPrivacyTarget] = useState<Collection | null>(null);
   const [colPrivacyValue, setColPrivacyValue] = useState<CollectionPrivacy>('public');
+  const [colAllowedIds, setColAllowedIds] = useState<string[]>([]);
 
   const [modalError, setModalError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
@@ -257,18 +261,35 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
     setActionBusy(true);
     setModalError(null);
     try {
-      const { error } = await supabase
+      const nextAllowed = photoPrivacyValue === 'limited' ? photoAllowedIds : [];
+      let { error } = await supabase
         .from('photos')
-        .update({ privacy: photoPrivacyValue })
+        .update({ privacy: photoPrivacyValue, allowed_user_ids: nextAllowed })
         .eq('id', photoPrivacyTarget.id)
         .eq('user_id', currentUserId);
+
+      if (
+        error &&
+        error.message?.toLowerCase().includes('allowed_user_ids') &&
+        photoPrivacyValue !== 'limited'
+      ) {
+        const retry = await supabase
+          .from('photos')
+          .update({ privacy: photoPrivacyValue })
+          .eq('id', photoPrivacyTarget.id)
+          .eq('user_id', currentUserId);
+        error = retry.error;
+      }
+
       if (error) {
         setModalError(error.message);
         return;
       }
       setPhotos((prev) =>
         prev.map((p) =>
-          p.id === photoPrivacyTarget.id ? { ...p, privacy: photoPrivacyValue } : p
+          p.id === photoPrivacyTarget.id
+            ? { ...p, privacy: photoPrivacyValue, allowed_user_ids: nextAllowed }
+            : p
         )
       );
       setPhotoPrivacyTarget(null);
@@ -311,18 +332,35 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
     setActionBusy(true);
     setModalError(null);
     try {
-      const { error } = await supabase
+      const nextAllowed = colPrivacyValue === 'limited' ? colAllowedIds : [];
+      let { error } = await supabase
         .from('collections')
-        .update({ privacy: colPrivacyValue })
+        .update({ privacy: colPrivacyValue, allowed_user_ids: nextAllowed })
         .eq('id', colPrivacyTarget.id)
         .eq('user_id', currentUserId);
+
+      if (
+        error &&
+        error.message?.toLowerCase().includes('allowed_user_ids') &&
+        colPrivacyValue !== 'limited'
+      ) {
+        const retry = await supabase
+          .from('collections')
+          .update({ privacy: colPrivacyValue })
+          .eq('id', colPrivacyTarget.id)
+          .eq('user_id', currentUserId);
+        error = retry.error;
+      }
+
       if (error) {
         setModalError(error.message);
         return;
       }
       setCollections((prev) =>
         prev.map((c) =>
-          c.id === colPrivacyTarget.id ? { ...c, privacy: colPrivacyValue } : c
+          c.id === colPrivacyTarget.id
+            ? { ...c, privacy: colPrivacyValue, allowed_user_ids: nextAllowed }
+            : c
         )
       );
       setColPrivacyTarget(null);
@@ -353,6 +391,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
     if (privacy === 'private') return <Lock className="w-3 h-3" strokeWidth={1.75} />;
     if (privacy === 'unlisted') return <Link2 className="w-3 h-3" strokeWidth={1.75} />;
     if (privacy === 'followers') return <Users className="w-3 h-3" strokeWidth={1.75} />;
+    if (privacy === 'limited') return <UserCheck className="w-3 h-3" strokeWidth={1.75} />;
     return <Globe className="w-3 h-3" strokeWidth={1.75} />;
   };
 
@@ -424,6 +463,9 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                 setModalError(null);
                 setPhotoPrivacyTarget(photo);
                 setPhotoPrivacyValue(photo.privacy);
+                setPhotoAllowedIds(
+                  Array.isArray(photo.allowed_user_ids) ? photo.allowed_user_ids : []
+                );
               }}
               className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-[#0A0A0A] hover:bg-[#F5F5F7] flex items-center gap-2.5 text-left"
             >
@@ -534,6 +576,11 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                     setModalError(null);
                     setColPrivacyTarget(activeCollection);
                     setColPrivacyValue(activeCollection.privacy || 'public');
+                    setColAllowedIds(
+                      Array.isArray(activeCollection.allowed_user_ids)
+                        ? activeCollection.allowed_user_ids
+                        : []
+                    );
                   }}
                   aria-label={`Collection privacy: ${getVisibilityLabel(
                     activeCollection.privacy || 'public'
@@ -793,6 +840,11 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                               setModalError(null);
                               setColPrivacyTarget(col);
                               setColPrivacyValue(colPrivacy);
+                              setColAllowedIds(
+                                Array.isArray(col.allowed_user_ids)
+                                  ? col.allowed_user_ids
+                                  : []
+                              );
                             }}
                             className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-[#0A0A0A] hover:bg-[#F5F5F7] flex items-center gap-2.5 text-left"
                           >
@@ -964,7 +1016,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
         >
           <form
             onSubmit={handlePhotoPrivacySubmit}
-            className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl"
+            className="w-full max-w-md max-h-[85vh] overflow-y-auto bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl"
           >
             <h2 className="text-base font-semibold text-[#0A0A0A]">
               Privacy for &ldquo;{photoPrivacyTarget.title}&rdquo;
@@ -986,6 +1038,11 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                     value: 'followers',
                     label: 'Followers',
                     desc: 'Visible only to users subscribed to you',
+                  },
+                  {
+                    value: 'limited',
+                    label: 'Limited',
+                    desc: 'Visible only to chosen StartOrigin users',
                   },
                   {
                     value: 'unlisted',
@@ -1019,6 +1076,14 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                 </button>
               ))}
             </div>
+            {photoPrivacyValue === 'limited' && (
+              <LimitedUsersPicker
+                compact
+                currentUserId={currentUserId}
+                selectedUserIds={photoAllowedIds}
+                onChange={setPhotoAllowedIds}
+              />
+            )}
             <div className="flex items-center justify-end gap-2 pt-1">
               <button
                 type="button"
@@ -1092,7 +1157,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
         >
           <form
             onSubmit={handleColPrivacySubmit}
-            className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl"
+            className="w-full max-w-md max-h-[85vh] overflow-y-auto bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl"
           >
             <h2 className="text-base font-semibold text-[#0A0A0A]">
               Privacy for &ldquo;{colPrivacyTarget.name}&rdquo;
@@ -1114,6 +1179,11 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                     value: 'followers',
                     label: 'Followers',
                     desc: 'Visible only to your followers (even with shared link)',
+                  },
+                  {
+                    value: 'limited',
+                    label: 'Limited',
+                    desc: 'Visible only to chosen StartOrigin users',
                   },
                   {
                     value: 'unlisted',
@@ -1147,6 +1217,14 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                 </button>
               ))}
             </div>
+            {colPrivacyValue === 'limited' && (
+              <LimitedUsersPicker
+                compact
+                currentUserId={currentUserId}
+                selectedUserIds={colAllowedIds}
+                onChange={setColAllowedIds}
+              />
+            )}
             <div className="flex items-center justify-end gap-2 pt-1">
               <button
                 type="button"
