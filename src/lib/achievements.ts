@@ -17,8 +17,6 @@ export type AchievementIconKey =
 export interface AchievementDefinition {
   id: string;
   name: string;
-  category: string;
-  tier: 'Hard' | 'Very Hard' | 'Legendary' | 'Exclusive';
   howToGet: string;
   flavor: string;
   icon: AchievementIconKey;
@@ -51,8 +49,6 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   {
     id: 'ten_frames',
     name: 'Ten Frames',
-    category: 'Photography',
-    tier: 'Hard',
     howToGet: 'Publish 10 photos to your gallery.',
     flavor: 'Every serious visual archive begins with ten deliberate frames.',
     icon: 'camera',
@@ -64,8 +60,6 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   {
     id: 'fifty_frames',
     name: 'Darkroom Veteran',
-    category: 'Photography',
-    tier: 'Very Hard',
     howToGet: 'Publish 50 photos to your gallery.',
     flavor: 'A sustained body of photographic work across seasons and light.',
     icon: 'aperture',
@@ -77,8 +71,6 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   {
     id: 'century_archive',
     name: 'Century Archive',
-    category: 'Photography',
-    tier: 'Legendary',
     howToGet: 'Publish 150 photos to build a living monograph.',
     flavor: 'Reserved for prolific photographers with an expansive visual vault.',
     icon: 'crown',
@@ -90,8 +82,6 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   {
     id: 'five_collections',
     name: 'Series Builder',
-    category: 'Curation',
-    tier: 'Hard',
     howToGet: 'Create 5 collections to organize your work.',
     flavor: 'Structure transforms scattered shots into coherent visual stories.',
     icon: 'folder',
@@ -103,8 +93,6 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   {
     id: 'fifteen_collections',
     name: 'Exhibition Director',
-    category: 'Curation',
-    tier: 'Very Hard',
     howToGet: 'Create 15 collections across your gallery.',
     flavor: 'Master-level curation with dedicated chapters for every theme.',
     icon: 'layers',
@@ -116,9 +104,7 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   {
     id: 'twentyfive_followers',
     name: 'Magnetic Lens',
-    category: 'Community',
-    tier: 'Hard',
-    howToGet: 'Reach 25 subscribers following your profile.',
+    howToGet: 'Reach 25 followers.',
     flavor: 'Your visual perspective draws a dedicated circle of viewers.',
     icon: 'users',
     accentHex: '#0284C7',
@@ -129,9 +115,7 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   {
     id: 'hundred_followers',
     name: 'Visual Luminary',
-    category: 'Community',
-    tier: 'Legendary',
-    howToGet: 'Reach 100 subscribers following your profile.',
+    howToGet: 'Reach 100 followers.',
     flavor: 'A recognized voice shaping inspiration across StartOrigin.',
     icon: 'star',
     accentHex: '#C026D3',
@@ -142,8 +126,6 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   {
     id: 'hundred_likes',
     name: 'Acclaimed Eye',
-    category: 'Recognition',
-    tier: 'Very Hard',
     howToGet: 'Receive 100 total likes across all of your photos.',
     flavor: 'Resonance measured by a hundred quiet moments of appreciation.',
     icon: 'heart',
@@ -155,8 +137,6 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   {
     id: 'grand_patron',
     name: 'Grand Patron',
-    category: 'Inspiration',
-    tier: 'Hard',
     howToGet: 'Save 30 photos for inspiration and follow 15 creators.',
     flavor: 'An active collector who supports and studies fellow artists.',
     icon: 'bookmark',
@@ -168,8 +148,6 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   {
     id: 'origin_verified',
     name: 'Origin Verified',
-    category: 'Account',
-    tier: 'Exclusive',
     howToGet: 'Hold an official Verified Creator account badge on StartOrigin.',
     flavor: 'Official account badge certifying an authentic, notable creator.',
     icon: 'shield',

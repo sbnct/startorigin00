@@ -1,4 +1,4 @@
-export type NavTab = 'feed' | 'search' | 'add' | 'gallery' | 'profile';
+export type NavTab = 'feed' | 'search' | 'add' | 'gallery' | 'notifications' | 'profile';
 
 export type VisibilityLevel = 'public' | 'followers' | 'limited' | 'unlisted' | 'private';
 export type PhotoPrivacy = VisibilityLevel;
@@ -55,6 +55,20 @@ export interface ActivityLog {
   description: string;
   is_public: boolean;
   created_at: string;
+}
+
+export type NotificationType = 'follow' | 'new_post' | 'like';
+
+export interface AppNotification {
+  id: string;
+  recipient_id: string;
+  actor_id: string;
+  type: NotificationType;
+  photo_id: string | null;
+  is_read: boolean;
+  created_at: string;
+  actor?: Pick<Profile, 'id' | 'name' | 'username' | 'avatar_url' | 'is_verified'> | null;
+  photo?: Pick<Photo, 'id' | 'title' | 'image_url'> | null;
 }
 
 export interface SavedPhotoItem {

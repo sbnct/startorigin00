@@ -60,6 +60,11 @@ export function getCollectionShareUrl(collectionId: string): string {
   return `${window.location.origin}/?collection=${encodeURIComponent(collectionId)}`;
 }
 
+export function getProfileShareUrl(userId: string): string {
+  if (typeof window === 'undefined') return `/?user=${encodeURIComponent(userId)}`;
+  return `${window.location.origin}/?user=${encodeURIComponent(userId)}`;
+}
+
 export async function copyTextToClipboard(text: string): Promise<boolean> {
   try {
     if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {

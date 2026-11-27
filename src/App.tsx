@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 import { CinemaPhoto, NavTab, Profile } from './types';
@@ -7,6 +7,7 @@ import { FeedView } from './components/FeedView';
 import { SearchView } from './components/SearchView';
 import { AddView } from './components/AddView';
 import { GalleryView } from './components/GalleryView';
+import { NotificationsView } from './components/NotificationsView';
 import { ProfileView } from './components/ProfileView';
 import { PostPageView } from './components/PostPageView';
 import { CollectionView } from './components/CollectionView';
@@ -16,6 +17,7 @@ import { OfflineIndicator } from './components/OfflineIndicator';
 import { AdminView } from './components/AdminView';
 import { LandingView } from './components/LandingView';
 import { syncAndNotifyAchievements } from './lib/achievements';
+import { fetchUnreadNotificationsCount } from './lib/notifications';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -77,11 +79,13 @@ function isAdminPath(): boolean {
 function hasDeepLinkParam(): boolean {
   if (typeof window === 'undefined') return false;
   const params = new URLSearchParams(window.location.search);
-  return Boolean(params.get('photo') || params.get('collection'));
+  return Boolean(
+    params.get('photo') || params.get('collection') || params.get('user')
+  );
 }
 
 function getInitialRouteStack(): RouteEntry[] {
-  if (typeof window === 'undefined') return [{ tab: 'feed' }];
+  if (typeof window === 'undefined') return [{ tab: 'add' }];
   const params = new URLSearchParams(window.location.search);
   const photoParam = params.get('photo');
   if (photoParam) {
@@ -91,7 +95,11 @@ function getInitialRouteStack(): RouteEntry[] {
   if (colParam) {
     return [{ tab: 'feed' }, { tab: 'feed', collectionId: colParam }];
   }
-  return [{ tab: 'feed' }];
+  const userParam = params.get('user');
+  if (userParam) {
+    return [{ tab: 'feed' }, { tab: 'feed', profileUserId: userParam }];
+  }
+  return [{ tab: 'add' }];
 }
 
 function syncUrlForRoute(entry: RouteEntry) {
@@ -99,10 +107,13 @@ function syncUrlForRoute(entry: RouteEntry) {
   const url = new URL(window.location.href);
   url.searchParams.delete('photo');
   url.searchParams.delete('collection');
+  url.searchParams.delete('user');
   if (entry.postId) {
     url.searchParams.set('photo', entry.postId);
   } else if (entry.collectionId) {
     url.searchParams.set('collection', entry.collectionId);
+  } else if (entry.profileUserId) {
+    url.searchParams.set('user', entry.profileUserId);
   }
   window.history.replaceState({}, '', url.pathname + url.search);
 }
@@ -119,8 +130,10 @@ function AppContent() {
   const [authInitialMode, setAuthInitialMode] = useState<'signin' | 'signup'>('signin');
   const [refreshKey, setRefreshKey] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
-  const currentRoute = routeStack[routeStack.length - 1] || { tab: 'feed' };
+  const prevUserIdRef = useRef<string | null>(null);
+  const currentRoute = routeStack[routeStack.length - 1] || { tab: 'add' };
 
   useEffect(() => {
     const onPopState = () => {
@@ -193,6 +206,7 @@ function AppContent() {
     supabase.auth
       .getSession()
       .then(({ data }) => {
+        prevUserIdRef.current = data.session?.user?.id || null;
         setSession(data.session);
         loadCurrentProfile(data.session);
         setAuthReady(true);
@@ -203,10 +217,17 @@ function AppContent() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      const nextUserId = nextSession?.user?.id || null;
+      const wasSignedOut = !prevUserIdRef.current;
+      prevUserIdRef.current = nextUserId;
+
       setSession(nextSession);
-      if (nextSession?.user) {
+      if (nextUserId) {
         setAuthModalOpen(false);
+        if (event === 'SIGNED_IN' && wasSignedOut && !hasDeepLinkParam()) {
+          setRouteStack([{ tab: 'add' }]);
+        }
       }
       loadCurrentProfile(nextSession);
       setAuthReady(true);
@@ -214,6 +235,41 @@ function AppContent() {
 
     return () => subscription.unsubscribe();
   }, [loadCurrentProfile]);
+
+  const refreshUnreadCount = useCallback(async (uid?: string | null) => {
+    if (!uid) {
+      setUnreadNotificationsCount(0);
+      return;
+    }
+    const count = await fetchUnreadNotificationsCount(uid);
+    setUnreadNotificationsCount(count);
+  }, []);
+
+  useEffect(() => {
+    const uid = session?.user?.id;
+    refreshUnreadCount(uid);
+    if (!uid) return;
+
+    const channel = supabase
+      .channel(`notifications:${uid}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `recipient_id=eq.${uid}`,
+        },
+        () => {
+          refreshUnreadCount(uid);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [session?.user?.id, refreshKey, refreshUnreadCount]);
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -344,7 +400,16 @@ function AppContent() {
     !session?.user &&
     !browseAsGuest &&
     !currentRoute.postId &&
-    !currentRoute.collectionId;
+    !currentRoute.collectionId &&
+    !currentRoute.profileUserId;
+
+  const handleAuthSuccess = () => {
+    setAuthModalOpen(false);
+    if (!hasDeepLinkParam()) {
+      setRouteStack([{ tab: 'add' }]);
+    }
+    bumpRefresh();
+  };
 
   if (showLanding) {
     return (
@@ -360,10 +425,7 @@ function AppContent() {
         {authModalOpen && (
           <AuthView
             initialMode={authInitialMode}
-            onSuccess={() => {
-              setAuthModalOpen(false);
-              bumpRefresh();
-            }}
+            onSuccess={handleAuthSuccess}
             onClose={() => setAuthModalOpen(false)}
           />
         )}
@@ -445,6 +507,10 @@ function AppContent() {
         return (
           <FeedView
             currentUserId={session?.user?.id || null}
+            unreadNotificationsCount={unreadNotificationsCount}
+            onMarkedNotificationsRead={() =>
+              refreshUnreadCount(session?.user?.id)
+            }
             onOpenCinema={openCinema}
             onOpenPost={handleOpenPost}
             onOpenProfile={handleOpenProfile}
@@ -468,10 +534,7 @@ function AppContent() {
         return (
           <AddView
             currentUserId={session?.user?.id || null}
-            onAuthSuccess={() => {
-              setAuthModalOpen(false);
-              bumpRefresh();
-            }}
+            onAuthSuccess={handleAuthSuccess}
             onNavigateGallery={() => handleSelectTab('gallery')}
             onDataChanged={bumpRefresh}
             onShowToast={showToast}
@@ -481,14 +544,23 @@ function AppContent() {
         return (
           <GalleryView
             currentUserId={session?.user?.id || null}
-            onAuthSuccess={() => {
-              setAuthModalOpen(false);
-              bumpRefresh();
-            }}
+            onAuthSuccess={handleAuthSuccess}
             onOpenCinema={openCinema}
             onOpenPost={handleOpenPost}
             onDataChanged={bumpRefresh}
             onShowToast={showToast}
+            refreshKey={refreshKey}
+          />
+        );
+      case 'notifications':
+        return (
+          <NotificationsView
+            currentUserId={session?.user?.id || null}
+            onAuthSuccess={handleAuthSuccess}
+            onOpenProfile={handleOpenProfile}
+            onOpenPost={handleOpenPost}
+            onShowToast={showToast}
+            onMarkedRead={() => refreshUnreadCount(session?.user?.id)}
             refreshKey={refreshKey}
           />
         );
@@ -497,10 +569,7 @@ function AppContent() {
           <ProfileView
             targetUserId={session?.user?.id || null}
             currentUserId={session?.user?.id || null}
-            onAuthSuccess={() => {
-              setAuthModalOpen(false);
-              bumpRefresh();
-            }}
+            onAuthSuccess={handleAuthSuccess}
             onOpenCinema={openCinema}
             onOpenPost={handleOpenPost}
             onOpenCollection={handleOpenCollection}
@@ -518,6 +587,10 @@ function AppContent() {
     }
   };
 
+  const routeViewKey = `${currentRoute.tab}:${currentRoute.postId || ''}:${
+    currentRoute.collectionId || ''
+  }:${currentRoute.profileUserId || ''}`;
+
   return (
     <div className="min-h-screen bg-white text-[#0A0A0A] flex flex-col md:flex-row">
       <Navigation
@@ -533,11 +606,16 @@ function AppContent() {
         }
         currentUserProfile={currentUserProfile}
         isAuthenticated={Boolean(session?.user)}
+        unreadNotificationsCount={unreadNotificationsCount}
         onOpenAuth={() => openAuth('signin')}
         onSignOut={handleSignOut}
       />
 
-      <main className="flex-1 min-w-0 pb-24 md:pb-12">{renderMainContent()}</main>
+      <main className="flex-1 min-w-0 pb-24 md:pb-12">
+        <div key={routeViewKey} className="animate-tab-panel">
+          {renderMainContent()}
+        </div>
+      </main>
 
       <CinemaModal
         items={cinemaState?.items || []}
@@ -548,10 +626,7 @@ function AppContent() {
       {authModalOpen && (
         <AuthView
           initialMode={authInitialMode}
-          onSuccess={() => {
-            setAuthModalOpen(false);
-            bumpRefresh();
-          }}
+          onSuccess={handleAuthSuccess}
           onClose={() => setAuthModalOpen(false)}
         />
       )}

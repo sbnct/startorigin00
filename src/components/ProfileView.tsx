@@ -34,6 +34,7 @@ import {
   formatRelativeTime,
   getCollectionShareUrl,
   getInitials,
+  getProfileShareUrl,
   sanitizeFilename,
 } from '../lib/utils';
 import { AuthView } from './AuthView';
@@ -41,6 +42,8 @@ import { ResilientImage } from './ResilientImage';
 import { VerifiedBadge } from './VerifiedBadge';
 import { PWAInstallButton } from './PWAInstallButton';
 import { LikeButton } from './LikeButton';
+import { SlidingTabs } from './SlidingTabs';
+import { ModalPortal } from './ModalPortal';
 import { fetchPhotoLikesMap, togglePhotoLike } from '../lib/likes';
 import {
   AchievementStatus,
@@ -96,6 +99,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [publicCollections, setPublicCollections] = useState<Collection[]>([]);
   const [savedPhotos, setSavedPhotos] = useState<SavedPhotoItem[]>([]);
   const [copiedColId, setCopiedColId] = useState<string | null>(null);
+  const [copiedProfileLink, setCopiedProfileLink] = useState(false);
   const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
   const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
   const [likeBusyIds, setLikeBusyIds] = useState<Set<string>>(new Set());
@@ -111,9 +115,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [subBusy, setSubBusy] = useState(false);
 
-  // Subscribers & Restrictions management modal (own profile)
+  // Connections modal (Followers | Following | Restricted) on own profile
   const [subscribersModalOpen, setSubscribersModalOpen] = useState(false);
-  const [subscribersModalTab, setSubscribersModalTab] = useState<'subscribers' | 'restricted'>('subscribers');
+  const [subscribersModalTab, setSubscribersModalTab] = useState<
+    'followers' | 'following' | 'restricted'
+  >('followers');
   const [subscribersList, setSubscribersList] = useState<
     Array<{ id: string; name: string; username: string; avatar_url: string }>
   >([]);
@@ -124,9 +130,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [subscriberActionId, setSubscriberActionId] = useState<string | null>(null);
   const [subscribersError, setSubscribersError] = useState<string | null>(null);
 
-  // Edit profile modal state (General | Following)
+  // Edit profile modal state (General only)
   const [editOpen, setEditOpen] = useState(false);
-  const [editTab, setEditTab] = useState<'general' | 'following'>('general');
   const [editName, setEditName] = useState('');
   const [editUsername, setEditUsername] = useState('');
   const [editBio, setEditBio] = useState('');
@@ -135,7 +140,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
 
-  // Following management tab inside Edit Profile
+  // Following list state (shown inside Connections modal)
   const [followingList, setFollowingList] = useState<
     Array<{ id: string; name: string; username: string; avatar_url: string; is_verified?: boolean }>
   >([]);
@@ -316,6 +321,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     loadProfileData();
   }, [loadProfileData, refreshKey]);
 
+  useEffect(() => {
+    if (!editOpen && !subscribersModalOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setEditOpen(false);
+        setSubscribersModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [editOpen, subscribersModalOpen]);
+
   const unlockedAchievements = achievements.filter((a) => a.unlocked);
   const showCollectionsTab = isOwnProfile || publicCollections.length > 0;
   const showAchievementsTab = isOwnProfile || unlockedAchievements.length > 0;
@@ -473,9 +490,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const openSubscribersModal = () => {
     if (!isOwnProfile) return;
-    setSubscribersModalTab('subscribers');
+    setSubscribersModalTab('followers');
+    setFollowingQuery('');
+    setFollowingError(null);
+    setSubscribersError(null);
     setSubscribersModalOpen(true);
     loadSubscribersModal();
+    loadFollowingModal();
   };
 
   const handleRemoveSubscriber = async (subUser: {
@@ -499,7 +520,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       }
       setSubscribersList((prev) => prev.filter((u) => u.id !== subUser.id));
       setSubscribersCount((c) => Math.max(0, c - 1));
-      onShowToast?.(`Removed @${subUser.username} from subscribers`);
+      onShowToast?.(`Removed @${subUser.username} from followers`);
     } finally {
       setSubscriberActionId(null);
     }
@@ -545,7 +566,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         prev.some((u) => u.id === subUser.id) ? prev : [subUser, ...prev]
       );
       setSubscribersCount((c) => Math.max(0, c - 1));
-      onShowToast?.(`Restricted @${subUser.username} from subscribing`);
+      onShowToast?.(`Restricted @${subUser.username} from following`);
     } finally {
       setSubscriberActionId(null);
     }
@@ -572,7 +593,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         return;
       }
       setRestrictedList((prev) => prev.filter((u) => u.id !== user.id));
-      onShowToast?.(`Allowed @${user.username} to subscribe again`);
+      onShowToast?.(`Allowed @${user.username} to follow again`);
     } finally {
       setSubscriberActionId(null);
     }
@@ -581,7 +602,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const handleToggleSubscribe = async () => {
     if (!currentUserId || !profile || isOwnProfile || subBusy) return;
     if (!isSubscribed && isRestrictedByOwner) {
-      onShowToast?.('You cannot subscribe to this user.');
+      onShowToast?.('You cannot follow this user.');
       return;
     }
     setSubBusy(true);
@@ -602,7 +623,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           target_user_id: profile.id,
         });
         if (error) {
-          onShowToast?.('You are restricted from subscribing to this user.');
+          onShowToast?.('You are restricted from following this user.');
           return;
         }
         setIsSubscribed(true);
@@ -612,7 +633,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           actor_id: currentUserId,
           action_type: 'subscribe',
           target_id: profile.id,
-          description: `Subscribed to @${profile.username}`,
+          description: `Followed @${profile.username}`,
           is_public: true,
         });
         syncAndNotifyAchievements(currentUserId, undefined, onShowToast);
@@ -622,19 +643,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     }
   };
 
-  const openEditModal = (initialTab: 'general' | 'following' = 'general') => {
+  const openEditModal = () => {
     if (!profile) return;
-    setEditTab(initialTab);
     setEditName(profile.name);
     setEditUsername(profile.username);
     setEditBio(profile.bio || '');
     setEditAvatarPreview(profile.avatar_url || '');
     setEditAvatarFile(null);
     setEditError(null);
-    setFollowingQuery('');
-    setFollowingError(null);
     setEditOpen(true);
-    loadFollowingModal();
   };
 
   const handleUnfollowUser = async (targetUser: {
@@ -836,13 +853,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             )}
 
             <div className="flex items-center gap-2 text-xs text-[#525252] pt-1 tabular-nums">
-              <span>
-                <strong className="font-semibold text-[#0A0A0A]">
-                  {publicPhotos.length}
-                </strong>{' '}
-                {publicPhotos.length === 1 ? 'photo' : 'photos'}
-              </span>
-              <span aria-hidden="true">·</span>
               {isOwnProfile ? (
                 <button
                   type="button"
@@ -852,16 +862,23 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   <strong className="font-semibold text-[#0A0A0A]">
                     {subscribersCount}
                   </strong>{' '}
-                  {subscribersCount === 1 ? 'subscriber' : 'subscribers'}
+                  {subscribersCount === 1 ? 'follower' : 'followers'}
                 </button>
               ) : (
                 <span>
                   <strong className="font-semibold text-[#0A0A0A]">
                     {subscribersCount}
                   </strong>{' '}
-                  {subscribersCount === 1 ? 'subscriber' : 'subscribers'}
+                  {subscribersCount === 1 ? 'follower' : 'followers'}
                 </span>
               )}
+              <span aria-hidden="true">·</span>
+              <span>
+                <strong className="font-semibold text-[#0A0A0A]">
+                  {publicPhotos.length}
+                </strong>{' '}
+                {publicPhotos.length === 1 ? 'photo' : 'photos'}
+              </span>
             </div>
           </div>
         </div>
@@ -872,11 +889,31 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <PWAInstallButton compact />
               <button
                 type="button"
-                onClick={() => openEditModal('general')}
+                onClick={openEditModal}
                 className="min-h-[44px] px-5 py-2.5 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-2 transition-colors whitespace-nowrap"
               >
                 <Pencil className="w-3.5 h-3.5" strokeWidth={1.75} />
                 <span>Edit Profile</span>
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await copyTextToClipboard(getProfileShareUrl(profile.id));
+                  if (ok) {
+                    setCopiedProfileLink(true);
+                    onShowToast?.('Profile link copied');
+                    setTimeout(() => setCopiedProfileLink(false), 2000);
+                  }
+                }}
+                aria-label="Copy profile link"
+                title="Copy profile link"
+                className="min-h-[44px] min-w-[44px] p-2.5 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-[#525252] hover:text-[#0A0A0A] inline-flex items-center justify-center transition-colors shrink-0"
+              >
+                {copiedProfileLink ? (
+                  <Check className="w-4 h-4" strokeWidth={2} />
+                ) : (
+                  <Link2 className="w-4 h-4" strokeWidth={1.75} />
+                )}
               </button>
               {onSignOut && (
                 <button
@@ -884,10 +921,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   onClick={onSignOut}
                   aria-label="Sign out"
                   title="Sign out"
-                  className="md:hidden min-h-[44px] px-3.5 py-2.5 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#525252] inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                  className="md:hidden min-h-[44px] min-w-[44px] p-2.5 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-[#525252] hover:text-[#0A0A0A] inline-flex items-center justify-center transition-colors shrink-0"
                 >
-                  <LogOut className="w-3.5 h-3.5" strokeWidth={1.75} />
-                  <span>Sign Out</span>
+                  <LogOut className="w-4 h-4" strokeWidth={1.75} />
                 </button>
               )}
             </>
@@ -913,95 +949,75 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     {isSubscribed ? (
                       <>
                         <Check className="w-3.5 h-3.5" />
-                        <span>Subscribed</span>
+                        <span>Following</span>
                       </>
                     ) : (
                       <>
                         <UserPlus className="w-3.5 h-3.5" />
-                        <span>Subscribe</span>
+                        <span>Follow</span>
                       </>
                     )}
                   </button>
                 ))}
 
+              <button
+                type="button"
+                onClick={async () => {
+                  const ok = await copyTextToClipboard(getProfileShareUrl(profile.id));
+                  if (ok) {
+                    setCopiedProfileLink(true);
+                    onShowToast?.('Profile link copied');
+                    setTimeout(() => setCopiedProfileLink(false), 2000);
+                  }
+                }}
+                aria-label="Copy profile link"
+                title="Copy profile link"
+                className="min-h-[44px] min-w-[44px] p-2.5 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-[#525252] hover:text-[#0A0A0A] inline-flex items-center justify-center transition-colors shrink-0"
+              >
+                {copiedProfileLink ? (
+                  <Check className="w-4 h-4" strokeWidth={2} />
+                ) : (
+                  <Link2 className="w-4 h-4" strokeWidth={1.75} />
+                )}
+              </button>
+
               <a
                 href="https://forms.gle/HgAKvJoMa3mBU3Bd6"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="min-h-[44px] px-4 py-2.5 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-xs font-medium text-[#525252] hover:text-[#0A0A0A] inline-flex items-center gap-2 transition-colors whitespace-nowrap"
+                aria-label="Report user"
+                title="Report"
+                className="min-h-[44px] min-w-[44px] p-2.5 rounded-xl border border-black/[0.12] bg-white hover:bg-[#F5F5F7] text-[#525252] hover:text-[#0A0A0A] inline-flex items-center justify-center transition-colors shrink-0"
               >
-                <Flag className="w-3.5 h-3.5" strokeWidth={1.75} />
-                <span>Report</span>
+                <Flag className="w-4 h-4" strokeWidth={1.75} />
               </a>
             </>
           )}
         </div>
       </div>
 
-      {/* Segmented Tabs */}
-      <div className="flex items-center gap-1 p-1 bg-[#F5F5F7] rounded-xl my-6 w-full sm:w-fit overflow-x-auto">
-        <button
-          type="button"
-          onClick={() => setActiveTab('photos')}
-          className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-            activeTab === 'photos'
-              ? 'bg-white text-[#0A0A0A] shadow-xs'
-              : 'text-[#737373] hover:text-[#0A0A0A]'
-          }`}
-        >
-          Photos
-        </button>
-        {showCollectionsTab && (
-          <button
-            type="button"
-            onClick={() => setActiveTab('collections')}
-            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-              activeTab === 'collections'
-                ? 'bg-white text-[#0A0A0A] shadow-xs'
-                : 'text-[#737373] hover:text-[#0A0A0A]'
-            }`}
-          >
-            Collections
-          </button>
-        )}
-        {showAchievementsTab && (
-          <button
-            type="button"
-            onClick={() => setActiveTab('achievements')}
-            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-              activeTab === 'achievements'
-                ? 'bg-white text-[#0A0A0A] shadow-xs'
-                : 'text-[#737373] hover:text-[#0A0A0A]'
-            }`}
-          >
-            Achievements
-          </button>
-        )}
-        {showSavedTab && (
-          <button
-            type="button"
-            onClick={() => setActiveTab('saved')}
-            className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-              activeTab === 'saved'
-                ? 'bg-white text-[#0A0A0A] shadow-xs'
-                : 'text-[#737373] hover:text-[#0A0A0A]'
-            }`}
-          >
-            Saved Photos
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => setActiveTab('activity')}
-          className={`min-h-[38px] px-4 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-            activeTab === 'activity'
-              ? 'bg-white text-[#0A0A0A] shadow-xs'
-              : 'text-[#737373] hover:text-[#0A0A0A]'
-          }`}
-        >
-          Recent Activity
-        </button>
+      {/* Segmented Tabs with sliding focus pill */}
+      <div className="my-6 w-full sm:w-fit overflow-x-auto">
+        <SlidingTabs
+          value={activeTab}
+          onChange={setActiveTab}
+          className="w-max min-w-full sm:min-w-0"
+          buttonClassName="min-h-[38px] px-4 py-1.5 text-xs"
+          items={[
+            { id: 'photos', label: 'Photos' },
+            ...(showCollectionsTab
+              ? [{ id: 'collections' as const, label: 'Collections' }]
+              : []),
+            ...(showAchievementsTab
+              ? [{ id: 'achievements' as const, label: 'Achievements' }]
+              : []),
+            ...(showSavedTab ? [{ id: 'saved' as const, label: 'Saved Photos' }] : []),
+            { id: 'activity', label: 'Recent Activity' },
+          ]}
+        />
       </div>
+
+      <div key={activeTab} className="animate-tab-panel">
 
       {/* Tab 1: Public Photos Grid (Photo -> Cinema, Name -> Post Page) */}
       {activeTab === 'photos' && (
@@ -1171,7 +1187,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       Achievements
                     </h2>
                     <p className="text-xs text-[#737373] mt-0.5 tabular-nums">
-                      {unlockedCount} of {totalCount} unlocked · Click any achievement to see how to unlock it
+                      {unlockedCount} of {totalCount} unlocked
                     </p>
                   </div>
                   <div className="w-full sm:w-48 space-y-1.5">
@@ -1204,15 +1220,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         <AchievementBadgeIcon status={status} size="md" />
 
                         <div className="min-w-0 flex-1 space-y-2">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <h3 className="text-sm font-semibold text-[#0A0A0A] truncate group-hover:underline">
-                                {definition.name}
-                              </h3>
-                              <p className="text-[11px] text-[#737373]">
-                                {definition.category} · {definition.tier}
-                              </p>
-                            </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <h3 className="text-sm font-semibold text-[#0A0A0A] truncate group-hover:underline min-w-0">
+                              {definition.name}
+                            </h3>
                             {unlocked && (
                               <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#059669] shrink-0">
                                 <Check className="w-3.5 h-3.5" strokeWidth={2.2} />
@@ -1349,19 +1360,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       )}
 
-      {/* Tabbed Edit Profile Modal (General | Following) */}
+      </div>
+
+      {/* Edit Profile Modal (General Only) */}
       {editOpen && (
-        <div
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Edit Profile"
-          onClick={() => setEditOpen(false)}
-        >
+        <ModalPortal>
           <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-white text-[#0A0A0A] border border-black/[0.08] rounded-3xl p-5 sm:p-7 space-y-5 shadow-2xl"
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-modal-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Edit Profile"
+            onClick={() => setEditOpen(false)}
           >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-white text-[#0A0A0A] border border-black/[0.08] rounded-3xl p-5 sm:p-7 space-y-5 shadow-2xl animate-modal-pop"
+            >
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-[#0A0A0A]">
                 Edit Profile
@@ -1376,442 +1390,391 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </button>
             </div>
 
-            {/* Modal Tabs: General | Following */}
-            <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-[#F5F5F7]">
-              {(
-                [
-                  { id: 'general', label: 'General' },
-                  { id: 'following', label: 'Following' },
-                ] as const
-              ).map((tab) => {
-                const active = editTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setEditTab(tab.id)}
-                    className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-                      active
-                        ? 'bg-white text-[#0A0A0A] shadow-xs'
-                        : 'text-[#737373] hover:text-[#0A0A0A]'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
+            <form onSubmit={handleSaveProfile} className="space-y-4">
+              {editError && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
+                  {editError}
+                </div>
+              )}
 
-            {/* Tab 1: General */}
-            {editTab === 'general' && (
-              <form onSubmit={handleSaveProfile} className="space-y-4">
-                {editError && (
-                  <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
-                    {editError}
+              <div className="flex items-center gap-4">
+                {editAvatarPreview ? (
+                  <img
+                    src={editAvatarPreview}
+                    alt={editName}
+                    className="w-16 h-16 rounded-full object-cover border border-black/[0.08]"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-full bg-[#0A0A0A] text-white text-base font-medium flex items-center justify-center">
+                    {getInitials(editName)}
                   </div>
                 )}
 
-                <div className="flex items-center gap-4">
-                  {editAvatarPreview ? (
-                    <img
-                      src={editAvatarPreview}
-                      alt={editName}
-                      className="w-16 h-16 rounded-full object-cover border border-black/[0.08]"
-                    />
-                  ) : (
-                    <div className="w-16 h-16 rounded-full bg-[#0A0A0A] text-white text-base font-medium flex items-center justify-center">
-                      {getInitials(editName)}
-                    </div>
-                  )}
-
-                  <label className="min-h-[40px] px-4 py-2 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#0A0A0A] cursor-pointer inline-flex items-center">
-                    <span>Change Avatar</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleAvatarSelected}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
-                    Name
-                  </label>
+                <label className="min-h-[40px] px-4 py-2 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#0A0A0A] cursor-pointer inline-flex items-center">
+                  <span>Change Avatar</span>
                   <input
-                    type="text"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarSelected}
+                    className="hidden"
                   />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
-                    Username
-                  </label>
-                  <input
-                    type="text"
-                    value={editUsername}
-                    onChange={(e) => setEditUsername(e.target.value)}
-                    className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
-                    Bio
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={editBio}
-                    onChange={(e) => setEditBio(e.target.value)}
-                    placeholder="Tell others about your photography..."
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm resize-none"
-                  />
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditOpen(false)}
-                    className="min-h-[44px] px-4 py-2 rounded-xl text-xs font-medium text-[#525252] hover:bg-[#F5F5F7]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={editSaving}
-                    className="min-h-[44px] px-5 py-2 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium hover:bg-black/85 disabled:opacity-50"
-                  >
-                    {editSaving ? 'Saving...' : 'Save Changes'}
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* Tab 2: Following */}
-            {editTab === 'following' && (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs text-[#737373]">
-                    Manage who you follow on StartOrigin.
-                  </p>
-                  <span className="text-xs text-[#737373] tabular-nums">
-                    {followingList.length}
-                  </span>
-                </div>
-
-                <div className="relative">
-                  <Search
-                    className="w-3.5 h-3.5 text-[#737373] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                    strokeWidth={1.75}
-                  />
-                  <input
-                    type="text"
-                    value={followingQuery}
-                    onChange={(e) => setFollowingQuery(e.target.value)}
-                    placeholder="Search..."
-                    className="w-full min-h-[40px] pl-9 pr-3 py-2 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-xs"
-                  />
-                </div>
-
-                {followingError && (
-                  <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
-                    {followingError}
-                  </div>
-                )}
-
-                <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
-                  {followingLoading ? (
-                    <div className="py-10 text-center text-xs text-[#737373]">
-                      Loading...
-                    </div>
-                  ) : (
-                    (() => {
-                      const q = followingQuery.trim().toLowerCase().replace(/^@/, '');
-                      const filtered = followingList.filter(
-                        (u) =>
-                          !q ||
-                          u.name.toLowerCase().includes(q) ||
-                          u.username.toLowerCase().includes(q)
-                      );
-                      if (filtered.length === 0) {
-                        return (
-                          <div className="py-10 text-center rounded-2xl border border-black/[0.06] bg-[#FAFAFA]">
-                            <Users
-                              className="w-6 h-6 mx-auto text-[#737373] mb-2"
-                              strokeWidth={1.5}
-                            />
-                            <p className="text-xs text-[#737373]">
-                              {followingList.length === 0
-                                ? 'You are not following anyone yet.'
-                                : 'No matching creators found.'}
-                            </p>
-                          </div>
-                        );
-                      }
-                      return filtered.map((u) => {
-                        const busy = followingActionId === u.id;
-                        return (
-                          <div
-                            key={u.id}
-                            className="p-3 rounded-2xl border border-black/[0.08] bg-white flex items-center justify-between gap-3"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditOpen(false);
-                                onOpenProfile?.(u.id);
-                              }}
-                              className="flex items-center gap-2.5 min-w-0 flex-1 text-left group"
-                            >
-                              {u.avatar_url ? (
-                                <img
-                                  src={u.avatar_url}
-                                  alt={u.name}
-                                  referrerPolicy="no-referrer"
-                                  className="w-9 h-9 rounded-full object-cover border border-black/[0.08] shrink-0"
-                                />
-                              ) : (
-                                <span className="w-9 h-9 rounded-full bg-[#0A0A0A] text-white text-xs font-medium flex items-center justify-center shrink-0">
-                                  {getInitials(u.name)}
-                                </span>
-                              )}
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-1">
-                                  <p className="text-xs font-semibold text-[#0A0A0A] truncate group-hover:underline">
-                                    {u.name}
-                                  </p>
-                                  <VerifiedBadge
-                                    username={u.username}
-                                    isVerified={u.is_verified}
-                                  />
-                                </div>
-                                <p className="text-[11px] text-[#737373] truncate">
-                                  @{u.username}
-                                </p>
-                              </div>
-                            </button>
-
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => handleUnfollowUser(u)}
-                              className="min-h-[34px] px-3 py-1.5 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-[11px] font-medium text-[#0A0A0A] inline-flex items-center gap-1.5 transition-colors disabled:opacity-40 shrink-0"
-                            >
-                              <UserMinus className="w-3.5 h-3.5" />
-                              <span>Unfollow</span>
-                            </button>
-                          </div>
-                        );
-                      });
-                    })()
-                  )}
-                </div>
+                </label>
               </div>
-            )}
+
+              <div>
+                <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
+                  Name
+                </label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  value={editUsername}
+                  onChange={(e) => setEditUsername(e.target.value)}
+                  className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-[#0A0A0A] mb-1.5">
+                  Bio
+                </label>
+                <textarea
+                  rows={3}
+                  value={editBio}
+                  onChange={(e) => setEditBio(e.target.value)}
+                  placeholder="Tell others about your photography..."
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditOpen(false)}
+                  className="min-h-[44px] px-4 py-2 rounded-xl text-xs font-medium text-[#525252] hover:bg-[#F5F5F7]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSaving}
+                  className="min-h-[44px] px-5 py-2 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium hover:bg-black/85 disabled:opacity-50"
+                >
+                  {editSaving ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
-      {/* Subscribers & Restrictions Modal (Own Profile) */}
+      {/* Connections Modal: Followers | Following | Restricted (Own Profile) */}
       {subscribersModalOpen && isOwnProfile && (
-        <div
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Manage subscribers"
-          onClick={() => setSubscribersModalOpen(false)}
-        >
+        <ModalPortal>
+          <div
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-modal-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Manage followers and following"
+            onClick={() => setSubscribersModalOpen(false)}
+          >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md max-h-[85vh] flex flex-col bg-white border border-black/[0.08] rounded-3xl p-5 sm:p-6 space-y-4 shadow-2xl"
+            className="w-full max-w-md max-h-[85vh] flex flex-col bg-white border border-black/[0.08] rounded-3xl p-5 sm:p-6 space-y-4 shadow-2xl animate-modal-pop"
           >
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-base font-semibold text-[#0A0A0A]">
-                Subscribers
+                Connections
               </h2>
               <button
                 type="button"
                 onClick={() => setSubscribersModalOpen(false)}
-                aria-label="Close subscribers"
-                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-full bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A]"
+                aria-label="Close connections"
+                className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-full bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A] transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="inline-flex items-center gap-1 p-1 bg-[#F5F5F7] rounded-xl self-start">
-              <button
-                type="button"
-                onClick={() => setSubscribersModalTab('subscribers')}
-                className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap tabular-nums ${
-                  subscribersModalTab === 'subscribers'
-                    ? 'bg-white text-[#0A0A0A] shadow-xs'
-                    : 'text-[#737373] hover:text-[#0A0A0A]'
-                }`}
-              >
-                Subscribers ({subscribersList.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setSubscribersModalTab('restricted')}
-                className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap tabular-nums ${
-                  subscribersModalTab === 'restricted'
-                    ? 'bg-white text-[#0A0A0A] shadow-xs'
-                    : 'text-[#737373] hover:text-[#0A0A0A]'
-                }`}
-              >
-                Restricted ({restrictedList.length})
-              </button>
+            <div className="overflow-x-auto">
+              <SlidingTabs
+                value={subscribersModalTab}
+                onChange={setSubscribersModalTab}
+                className="w-max min-w-full sm:min-w-0"
+                buttonClassName="min-h-[36px] px-3 py-1.5 text-xs tabular-nums"
+                items={[
+                  { id: 'followers', label: `Followers (${subscribersList.length})` },
+                  { id: 'following', label: `Following (${followingList.length})` },
+                  { id: 'restricted', label: `Restricted (${restrictedList.length})` },
+                ]}
+              />
             </div>
 
-            {subscribersError && (
+            {(subscribersError || followingError) && (
               <div className="p-3 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-700">
-                {subscribersError}
+                {subscribersError || followingError}
               </div>
             )}
 
-            <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-              {subscribersLoading ? (
-                <div className="py-10 text-center text-xs text-[#737373]">
-                  Loading...
-                </div>
-              ) : subscribersModalTab === 'subscribers' ? (
-                subscribersList.length === 0 ? (
+            <div className="flex-1 overflow-y-auto pr-1">
+              <div key={subscribersModalTab} className="space-y-2.5 animate-tab-panel">
+                {subscribersModalTab === 'followers' ? (
+                  subscribersLoading ? (
+                    <div className="py-10 text-center text-xs text-[#737373]">
+                      Loading...
+                    </div>
+                  ) : subscribersList.length === 0 ? (
+                    <div className="py-12 text-center rounded-2xl border border-black/[0.06] bg-[#FAFAFA]">
+                      <Users className="w-6 h-6 mx-auto text-[#737373] mb-2" strokeWidth={1.5} />
+                      <p className="text-xs text-[#737373]">No followers yet.</p>
+                    </div>
+                  ) : (
+                    subscribersList.map((subUser) => {
+                      const busy = subscriberActionId === subUser.id;
+                      return (
+                        <div
+                          key={subUser.id}
+                          className="p-3 rounded-2xl border border-black/[0.08] bg-white flex items-center justify-between gap-3"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSubscribersModalOpen(false);
+                              onOpenProfile?.(subUser.id);
+                            }}
+                            className="flex items-center gap-2.5 min-w-0 flex-1 text-left group"
+                          >
+                            {subUser.avatar_url ? (
+                              <img
+                                src={subUser.avatar_url}
+                                alt={subUser.name}
+                                referrerPolicy="no-referrer"
+                                className="w-9 h-9 rounded-full object-cover border border-black/[0.08] shrink-0"
+                              />
+                            ) : (
+                              <span className="w-9 h-9 rounded-full bg-[#0A0A0A] text-white text-xs font-medium flex items-center justify-center shrink-0">
+                                {getInitials(subUser.name)}
+                              </span>
+                            )}
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1">
+                                <p className="text-xs font-semibold text-[#0A0A0A] truncate group-hover:underline">
+                                  {subUser.name}
+                                </p>
+                                <VerifiedBadge username={subUser.username} />
+                              </div>
+                              <p className="text-[11px] text-[#737373] truncate">
+                                @{subUser.username}
+                              </p>
+                            </div>
+                          </button>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => handleRemoveSubscriber(subUser)}
+                              className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-[11px] font-medium text-[#0A0A0A] inline-flex items-center gap-1 transition-colors disabled:opacity-40 whitespace-nowrap"
+                            >
+                              <UserX className="w-3.5 h-3.5" />
+                              <span>Remove</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => handleRestrictSubscriber(subUser)}
+                              className="min-h-[34px] px-2.5 py-1.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-[11px] font-medium inline-flex items-center gap-1 transition-colors disabled:opacity-40 whitespace-nowrap"
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                              <span>Restrict</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )
+                ) : subscribersModalTab === 'following' ? (
+                  <div className="space-y-3">
+                    <div className="relative">
+                      <Search
+                        className="w-3.5 h-3.5 text-[#737373] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                        strokeWidth={1.75}
+                      />
+                      <input
+                        type="text"
+                        value={followingQuery}
+                        onChange={(e) => setFollowingQuery(e.target.value)}
+                        placeholder="Search..."
+                        className="w-full min-h-[40px] pl-9 pr-3 py-2 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-xs"
+                      />
+                    </div>
+
+                    {followingLoading ? (
+                      <div className="py-10 text-center text-xs text-[#737373]">
+                        Loading...
+                      </div>
+                    ) : (
+                      (() => {
+                        const q = followingQuery.trim().toLowerCase().replace(/^@/, '');
+                        const filtered = followingList.filter(
+                          (u) =>
+                            !q ||
+                            u.name.toLowerCase().includes(q) ||
+                            u.username.toLowerCase().includes(q)
+                        );
+                        if (filtered.length === 0) {
+                          return (
+                            <div className="py-10 text-center rounded-2xl border border-black/[0.06] bg-[#FAFAFA]">
+                              <Users
+                                className="w-6 h-6 mx-auto text-[#737373] mb-2"
+                                strokeWidth={1.5}
+                              />
+                              <p className="text-xs text-[#737373]">
+                                {followingList.length === 0
+                                  ? 'You are not following anyone yet.'
+                                  : 'No matching users found.'}
+                              </p>
+                            </div>
+                          );
+                        }
+                        return filtered.map((u) => {
+                          const busy = followingActionId === u.id;
+                          return (
+                            <div
+                              key={u.id}
+                              className="p-3 rounded-2xl border border-black/[0.08] bg-white flex items-center justify-between gap-3"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSubscribersModalOpen(false);
+                                  onOpenProfile?.(u.id);
+                                }}
+                                className="flex items-center gap-2.5 min-w-0 flex-1 text-left group"
+                              >
+                                {u.avatar_url ? (
+                                  <img
+                                    src={u.avatar_url}
+                                    alt={u.name}
+                                    referrerPolicy="no-referrer"
+                                    className="w-9 h-9 rounded-full object-cover border border-black/[0.08] shrink-0"
+                                  />
+                                ) : (
+                                  <span className="w-9 h-9 rounded-full bg-[#0A0A0A] text-white text-xs font-medium flex items-center justify-center shrink-0">
+                                    {getInitials(u.name)}
+                                  </span>
+                                )}
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1">
+                                    <p className="text-xs font-semibold text-[#0A0A0A] truncate group-hover:underline">
+                                      {u.name}
+                                    </p>
+                                    <VerifiedBadge
+                                      username={u.username}
+                                      isVerified={u.is_verified}
+                                    />
+                                  </div>
+                                  <p className="text-[11px] text-[#737373] truncate">
+                                    @{u.username}
+                                  </p>
+                                </div>
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => handleUnfollowUser(u)}
+                                className="min-h-[34px] px-3 py-1.5 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-[11px] font-medium text-[#0A0A0A] inline-flex items-center gap-1.5 transition-colors disabled:opacity-40 shrink-0"
+                              >
+                                <UserMinus className="w-3.5 h-3.5" />
+                                <span>Unfollow</span>
+                              </button>
+                            </div>
+                          );
+                        });
+                      })()
+                    )}
+                  </div>
+                ) : subscribersLoading ? (
+                  <div className="py-10 text-center text-xs text-[#737373]">
+                    Loading...
+                  </div>
+                ) : restrictedList.length === 0 ? (
                   <div className="py-12 text-center rounded-2xl border border-black/[0.06] bg-[#FAFAFA]">
-                    <Users className="w-6 h-6 mx-auto text-[#737373] mb-2" strokeWidth={1.5} />
-                    <p className="text-xs text-[#737373]">No subscribers yet.</p>
+                    <Ban className="w-6 h-6 mx-auto text-[#737373] mb-2" strokeWidth={1.5} />
+                    <p className="text-xs text-[#737373]">No restricted users.</p>
                   </div>
                 ) : (
-                  subscribersList.map((subUser) => {
-                    const busy = subscriberActionId === subUser.id;
+                  restrictedList.map((user) => {
+                    const busy = subscriberActionId === user.id;
                     return (
                       <div
-                        key={subUser.id}
+                        key={user.id}
                         className="p-3 rounded-2xl border border-black/[0.08] bg-white flex items-center justify-between gap-3"
                       >
                         <button
                           type="button"
                           onClick={() => {
                             setSubscribersModalOpen(false);
-                            onOpenProfile?.(subUser.id);
+                            onOpenProfile?.(user.id);
                           }}
                           className="flex items-center gap-2.5 min-w-0 flex-1 text-left group"
                         >
-                          {subUser.avatar_url ? (
+                          {user.avatar_url ? (
                             <img
-                              src={subUser.avatar_url}
-                              alt={subUser.name}
+                              src={user.avatar_url}
+                              alt={user.name}
                               referrerPolicy="no-referrer"
                               className="w-9 h-9 rounded-full object-cover border border-black/[0.08] shrink-0"
                             />
                           ) : (
                             <span className="w-9 h-9 rounded-full bg-[#0A0A0A] text-white text-xs font-medium flex items-center justify-center shrink-0">
-                              {getInitials(subUser.name)}
+                              {getInitials(user.name)}
                             </span>
                           )}
                           <div className="min-w-0">
                             <div className="flex items-center gap-1">
                               <p className="text-xs font-semibold text-[#0A0A0A] truncate group-hover:underline">
-                                {subUser.name}
+                                {user.name}
                               </p>
-                              <VerifiedBadge username={subUser.username} />
+                              <VerifiedBadge username={user.username} />
                             </div>
                             <p className="text-[11px] text-[#737373] truncate">
-                              @{subUser.username}
+                              @{user.username}
                             </p>
                           </div>
                         </button>
 
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => handleRemoveSubscriber(subUser)}
-                            className="min-h-[34px] px-2.5 py-1.5 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-[11px] font-medium text-[#0A0A0A] inline-flex items-center gap-1 transition-colors disabled:opacity-40 whitespace-nowrap"
-                          >
-                            <UserX className="w-3.5 h-3.5" />
-                            <span>Remove</span>
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => handleRestrictSubscriber(subUser)}
-                            className="min-h-[34px] px-2.5 py-1.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 text-[11px] font-medium inline-flex items-center gap-1 transition-colors disabled:opacity-40 whitespace-nowrap"
-                          >
-                            <Ban className="w-3.5 h-3.5" />
-                            <span>Restrict</span>
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => handleAllowUser(user)}
+                          className="min-h-[34px] px-3 py-1.5 rounded-xl bg-[#0A0A0A] hover:bg-black/85 text-white text-[11px] font-medium inline-flex items-center gap-1 transition-colors disabled:opacity-40 whitespace-nowrap shrink-0"
+                        >
+                          <UserCheck className="w-3.5 h-3.5" />
+                          <span>Allow</span>
+                        </button>
                       </div>
                     );
                   })
-                )
-              ) : restrictedList.length === 0 ? (
-                <div className="py-12 text-center rounded-2xl border border-black/[0.06] bg-[#FAFAFA]">
-                  <Ban className="w-6 h-6 mx-auto text-[#737373] mb-2" strokeWidth={1.5} />
-                  <p className="text-xs text-[#737373]">No restricted users.</p>
-                </div>
-              ) : (
-                restrictedList.map((user) => {
-                  const busy = subscriberActionId === user.id;
-                  return (
-                    <div
-                      key={user.id}
-                      className="p-3 rounded-2xl border border-black/[0.08] bg-white flex items-center justify-between gap-3"
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSubscribersModalOpen(false);
-                          onOpenProfile?.(user.id);
-                        }}
-                        className="flex items-center gap-2.5 min-w-0 flex-1 text-left group"
-                      >
-                        {user.avatar_url ? (
-                          <img
-                            src={user.avatar_url}
-                            alt={user.name}
-                            referrerPolicy="no-referrer"
-                            className="w-9 h-9 rounded-full object-cover border border-black/[0.08] shrink-0"
-                          />
-                        ) : (
-                          <span className="w-9 h-9 rounded-full bg-[#0A0A0A] text-white text-xs font-medium flex items-center justify-center shrink-0">
-                            {getInitials(user.name)}
-                          </span>
-                        )}
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1">
-                            <p className="text-xs font-semibold text-[#0A0A0A] truncate group-hover:underline">
-                              {user.name}
-                            </p>
-                            <VerifiedBadge username={user.username} />
-                          </div>
-                          <p className="text-[11px] text-[#737373] truncate">
-                            @{user.username}
-                          </p>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => handleAllowUser(user)}
-                        className="min-h-[34px] px-3 py-1.5 rounded-xl bg-[#0A0A0A] hover:bg-black/85 text-white text-[11px] font-medium inline-flex items-center gap-1 transition-colors disabled:opacity-40 whitespace-nowrap shrink-0"
-                      >
-                        <UserCheck className="w-3.5 h-3.5" />
-                        <span>Allow</span>
-                      </button>
-                    </div>
-                  );
-                })
-              )}
+                )}
+              </div>
             </div>
           </div>
-        </div>
+          </div>
+        </ModalPortal>
       )}
 
       {/* Achievement Detail Modal */}

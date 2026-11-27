@@ -8,6 +8,7 @@ import {
   X,
 } from 'lucide-react';
 import { CinemaPhoto } from '../types';
+import { ModalPortal } from './ModalPortal';
 
 interface CinemaModalProps {
   items: CinemaPhoto[];
@@ -178,8 +179,9 @@ export const CinemaModal: React.FC<CinemaModalProps> = ({
   };
 
   return (
+    <ModalPortal>
     <div
-      className="fixed inset-0 z-50 bg-[#050505]/95 backdrop-blur-2xl flex flex-col justify-between select-none"
+      className="fixed inset-0 z-50 bg-[#050505]/95 backdrop-blur-2xl flex flex-col justify-between select-none animate-modal-backdrop"
       role="dialog"
       aria-modal="true"
       aria-label={`Cinema view for ${photo.title}`}
@@ -344,5 +346,6 @@ export const CinemaModal: React.FC<CinemaModalProps> = ({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 };

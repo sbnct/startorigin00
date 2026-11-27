@@ -13,6 +13,8 @@ import {
 } from '../lib/uploadGuard';
 import { RulesModal } from './RulesModal';
 import { LimitedUsersPicker } from './LimitedUsersPicker';
+import { SlidingTabs } from './SlidingTabs';
+import { ModalPortal } from './ModalPortal';
 
 interface AddPhotoModalProps {
   isOpen: boolean;
@@ -310,8 +312,9 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
   };
 
   return (
+    <ModalPortal>
     <div
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-modal-backdrop"
       role="dialog"
       aria-modal="true"
       aria-label={`Add photo to ${destinationName}`}
@@ -320,7 +323,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
       <form
         onSubmit={handleUploadPhotos}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl max-h-[90vh] overflow-y-auto bg-white border border-black/[0.08] rounded-3xl p-5 sm:p-7 space-y-5 shadow-2xl"
+        className="w-full max-w-xl max-h-[90vh] overflow-y-auto bg-white border border-black/[0.08] rounded-3xl p-5 sm:p-7 space-y-5 shadow-2xl animate-modal-pop"
       >
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -343,30 +346,15 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
           </button>
         </div>
 
-        <div className="inline-flex items-center gap-1 p-1 bg-[#F5F5F7] rounded-xl">
-          <button
-            type="button"
-            onClick={() => setUseUnified(true)}
-            className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-              useUnified
-                ? 'bg-white text-[#0A0A0A] shadow-xs'
-                : 'text-[#737373] hover:text-[#0A0A0A]'
-            }`}
-          >
-            Unified Settings
-          </button>
-          <button
-            type="button"
-            onClick={() => setUseUnified(false)}
-            className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-              !useUnified
-                ? 'bg-white text-[#0A0A0A] shadow-xs'
-                : 'text-[#737373] hover:text-[#0A0A0A]'
-            }`}
-          >
-            Per Photo
-          </button>
-        </div>
+        <SlidingTabs
+          value={useUnified ? 'unified' : 'per-photo'}
+          onChange={(v) => setUseUnified(v === 'unified')}
+          buttonClassName="min-h-[36px] px-3 py-1.5 text-xs"
+          items={[
+            { id: 'unified', label: 'Unified Settings' },
+            { id: 'per-photo', label: 'Per Photo' },
+          ]}
+        />
 
         {error && (
           <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-700">
@@ -451,7 +439,7 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
                   className="w-full min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#F5F5F7] border border-transparent focus:bg-white focus:border-[#0A0A0A] outline-none text-base md:text-sm"
                 >
                   <option value="public">Public (Feed &amp; Profile)</option>
-                  <option value="followers">Followers (Only subscribers)</option>
+                  <option value="followers">Followers (Only followers)</option>
                   <option value="limited">Limited (Only chosen users)</option>
                   <option value="unlisted">By Link (Only via shared link)</option>
                   <option value="private">Private (Gallery only)</option>
@@ -648,5 +636,6 @@ export const AddPhotoModal: React.FC<AddPhotoModalProps> = ({
         }}
       />
     </div>
+    </ModalPortal>
   );
 };

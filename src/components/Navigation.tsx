@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
+  Bell,
   Compass,
   LayoutGrid,
   LogOut,
@@ -20,11 +21,24 @@ interface NavigationProps {
   onBrandClick?: () => void;
   currentUserProfile: Profile | null;
   isAuthenticated: boolean;
+  unreadNotificationsCount?: number;
   onOpenAuth: () => void;
   onSignOut: () => void;
 }
 
-const NAV_ITEMS: {
+const DESKTOP_NAV_ITEMS: {
+  id: NavTab;
+  label: string;
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
+}[] = [
+  { id: 'feed', label: 'Feed', icon: Compass },
+  { id: 'search', label: 'Search', icon: Search },
+  { id: 'add', label: 'Add', icon: Plus },
+  { id: 'gallery', label: 'Gallery', icon: LayoutGrid },
+  { id: 'profile', label: 'Profile', icon: User },
+];
+
+const MOBILE_NAV_ITEMS: {
   id: NavTab;
   label: string;
   icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
@@ -42,10 +56,41 @@ export const Navigation: React.FC<NavigationProps> = ({
   onBrandClick,
   currentUserProfile,
   isAuthenticated,
+  unreadNotificationsCount = 0,
   onOpenAuth,
   onSignOut,
 }) => {
   const [sidebarHidden, setSidebarHidden] = useState(false);
+
+  const desktopNavRef = useRef<HTMLElement | null>(null);
+  const desktopBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [desktopPill, setDesktopPill] = useState<{
+    top: number;
+    height: number;
+    ready: boolean;
+  }>({ top: 0, height: 0, ready: false });
+
+  const updateDesktopPill = useCallback(() => {
+    const activeEl = desktopBtnRefs.current[activeTab];
+    if (!activeEl) {
+      setDesktopPill((prev) => ({ ...prev, ready: false }));
+      return;
+    }
+    setDesktopPill({
+      top: activeEl.offsetTop,
+      height: activeEl.offsetHeight,
+      ready: activeEl.offsetHeight > 0,
+    });
+  }, [activeTab]);
+
+  useLayoutEffect(() => {
+    if (sidebarHidden) return;
+    updateDesktopPill();
+    window.addEventListener('resize', updateDesktopPill);
+    return () => window.removeEventListener('resize', updateDesktopPill);
+  }, [updateDesktopPill, sidebarHidden]);
+
+  const activeMobileIndex = MOBILE_NAV_ITEMS.findIndex((i) => i.id === activeTab);
 
   return (
     <>
@@ -56,7 +101,7 @@ export const Navigation: React.FC<NavigationProps> = ({
           onClick={() => setSidebarHidden(false)}
           aria-label="Show navigation menu"
           title="Show menu"
-          className="hidden md:flex fixed top-5 left-5 z-30 min-h-[44px] px-3.5 py-2 rounded-2xl bg-white/90 backdrop-blur-xl border border-black/[0.1] shadow-sm items-center gap-2 text-xs font-medium text-[#0A0A0A] hover:bg-[#F5F5F7] transition-colors"
+          className="hidden md:flex fixed top-5 left-5 z-30 min-h-[44px] px-3.5 py-2 rounded-2xl bg-white/90 backdrop-blur-xl border border-black/[0.1] shadow-sm items-center gap-2 text-xs font-medium text-[#0A0A0A] hover:bg-[#F5F5F7] transition-colors animate-popover-in"
         >
           <PanelLeftOpen className="w-4 h-4" strokeWidth={1.75} />
           <span>Menu</span>
@@ -89,8 +134,23 @@ export const Navigation: React.FC<NavigationProps> = ({
               </button>
             </div>
 
-            <nav aria-label="Main navigation" className="space-y-1.5">
-              {NAV_ITEMS.map((item) => {
+            <nav
+              ref={desktopNavRef}
+              aria-label="Main navigation"
+              className="relative space-y-1.5"
+            >
+              {desktopPill.ready && (
+                <span
+                  aria-hidden="true"
+                  className="absolute left-0 right-0 rounded-xl bg-[#0A0A0A] pointer-events-none transition-[transform,height] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+                  style={{
+                    height: `${desktopPill.height}px`,
+                    transform: `translate3d(0, ${desktopPill.top}px, 0)`,
+                  }}
+                />
+              )}
+
+              {DESKTOP_NAV_ITEMS.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
                 const isAdd = item.id === 'add';
@@ -98,11 +158,14 @@ export const Navigation: React.FC<NavigationProps> = ({
                 return (
                   <button
                     key={item.id}
+                    ref={(el) => {
+                      desktopBtnRefs.current[item.id] = el;
+                    }}
                     type="button"
                     onClick={() => onSelectTab(item.id)}
-                    className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl flex items-center gap-3.5 text-sm transition-colors whitespace-nowrap shrink-0 ${
+                    className={`relative z-10 w-full min-h-[44px] px-3.5 py-2.5 rounded-xl flex items-center gap-3.5 text-sm transition-colors duration-200 whitespace-nowrap shrink-0 ${
                       isActive
-                        ? 'bg-[#0A0A0A] text-white font-medium'
+                        ? 'text-white font-medium'
                         : isAdd
                         ? 'text-[#0A0A0A] bg-[#F5F5F7] hover:bg-black/[0.08] font-medium'
                         : 'text-[#525252] hover:text-[#0A0A0A] hover:bg-[#F5F5F7] font-normal'
@@ -119,8 +182,41 @@ export const Navigation: React.FC<NavigationProps> = ({
             </nav>
           </div>
 
-          <div className="space-y-2.5 pt-4 border-t border-black/[0.08]">
-            <PWAInstallButton />
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => onSelectTab('notifications')}
+              className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl flex items-center justify-between gap-2 text-sm transition-colors duration-200 whitespace-nowrap shrink-0 ${
+                activeTab === 'notifications'
+                  ? 'bg-[#0A0A0A] text-white font-medium'
+                  : 'text-[#525252] hover:text-[#0A0A0A] hover:bg-[#F5F5F7] font-normal'
+              }`}
+            >
+              <span className="flex items-center gap-3.5 min-w-0">
+                <Bell
+                  className="w-[18px] h-[18px] shrink-0"
+                  strokeWidth={activeTab === 'notifications' ? 2 : 1.75}
+                />
+                <span>Notifications</span>
+              </span>
+
+              {unreadNotificationsCount > 0 && (
+                <span
+                  className={`min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-semibold tabular-nums inline-flex items-center justify-center shrink-0 ${
+                    activeTab === 'notifications'
+                      ? 'bg-white text-[#0A0A0A]'
+                      : 'bg-[#0A0A0A] text-white'
+                  }`}
+                >
+                  {unreadNotificationsCount > 99
+                    ? '99+'
+                    : unreadNotificationsCount}
+                </span>
+              )}
+            </button>
+
+            <div className="space-y-2.5 pt-4 border-t border-black/[0.08]">
+              <PWAInstallButton />
 
             {isAuthenticated && currentUserProfile ? (
               <div className="flex items-center justify-between gap-2 px-2 py-1.5">
@@ -176,17 +272,30 @@ export const Navigation: React.FC<NavigationProps> = ({
                 Sign In
               </button>
             )}
+            </div>
           </div>
         </aside>
       )}
 
-      {/* Mobile Fixed Bottom Navigation Bar (No top header) */}
+      {/* Mobile Fixed Bottom Navigation Bar */}
       <nav
         aria-label="Mobile navigation"
         className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-xl border-t border-black/[0.08] pb-safe [transform:translateZ(0)]"
       >
-        <div className="grid grid-cols-5 items-center h-16 px-1">
-          {NAV_ITEMS.map((item) => {
+        <div className="relative grid grid-cols-5 items-center h-16 px-1">
+          {activeMobileIndex >= 0 && (
+            <span
+              aria-hidden="true"
+              className="absolute top-0 left-1 w-[calc((100%-0.5rem)/5)] flex justify-center pointer-events-none transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"
+              style={{
+                transform: `translate3d(${activeMobileIndex * 100}%, 0, 0)`,
+              }}
+            >
+              <span className="w-8 h-[2px] rounded-full bg-[#0A0A0A]" />
+            </span>
+          )}
+
+          {MOBILE_NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             const isAdd = item.id === 'add';
@@ -201,9 +310,9 @@ export const Navigation: React.FC<NavigationProps> = ({
                   className="flex flex-col items-center justify-center min-h-[44px]"
                 >
                   <span
-                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-transform active:scale-95 ${
+                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-transform duration-200 active:scale-95 ${
                       isActive
-                        ? 'bg-[#0A0A0A] text-white ring-2 ring-black/15'
+                        ? 'bg-[#0A0A0A] text-white ring-2 ring-black/20 scale-105'
                         : 'bg-[#0A0A0A] text-white'
                     }`}
                   >
@@ -218,8 +327,8 @@ export const Navigation: React.FC<NavigationProps> = ({
                 key={item.id}
                 type="button"
                 onClick={() => onSelectTab(item.id)}
-                className={`flex flex-col items-center justify-center min-h-[44px] transition-colors ${
-                  isActive ? 'text-[#0A0A0A]' : 'text-[#737373]'
+                className={`flex flex-col items-center justify-center min-h-[44px] transition-all duration-200 ${
+                  isActive ? 'text-[#0A0A0A] scale-[1.03]' : 'text-[#737373]'
                 }`}
               >
                 <Icon className="w-[21px] h-[21px]" strokeWidth={isActive ? 2.1 : 1.65} />

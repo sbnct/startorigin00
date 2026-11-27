@@ -70,6 +70,12 @@ ALTER TABLE public.photos
   ADD COLUMN IF NOT EXISTS allowed_user_ids uuid[] NOT NULL DEFAULT '{}';
 
 ALTER TABLE public.photos
+  DROP CONSTRAINT IF EXISTS photos_collection_id_fkey;
+ALTER TABLE public.photos
+  ADD CONSTRAINT photos_collection_id_fkey
+  FOREIGN KEY (collection_id) REFERENCES public.collections(id) ON DELETE SET NULL;
+
+ALTER TABLE public.photos
   DROP CONSTRAINT IF EXISTS photos_privacy_check;
 ALTER TABLE public.photos
   ADD CONSTRAINT photos_privacy_check CHECK (privacy IN ('public', 'followers', 'limited', 'unlisted', 'private'));
@@ -609,13 +615,18 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
+  IF TG_OP = 'DELETE' THEN
+    PERFORM public.refresh_user_achievements(OLD.user_id);
+    RETURN OLD;
+  END IF;
+
   IF TG_OP IN ('INSERT', 'UPDATE') THEN
     PERFORM public.refresh_user_achievements(NEW.user_id);
   END IF;
-  IF TG_OP IN ('DELETE', 'UPDATE') AND OLD.user_id IS DISTINCT FROM NEW.user_id THEN
+  IF TG_OP = 'UPDATE' AND OLD.user_id IS DISTINCT FROM NEW.user_id THEN
     PERFORM public.refresh_user_achievements(OLD.user_id);
   END IF;
-  RETURN COALESCE(NEW, OLD);
+  RETURN NEW;
 END;
 $$;
 
@@ -690,6 +701,146 @@ BEGIN
   FOR r IN SELECT id FROM public.profiles LOOP
     PERFORM public.refresh_user_achievements(r.id);
   END LOOP;
+END;
+$$;
+
+-- 8. Notifications & Realtime Triggers
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  recipient_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  actor_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  type text NOT NULL CHECK (type IN ('follow', 'new_post', 'like')),
+  photo_id uuid REFERENCES public.photos(id) ON DELETE CASCADE,
+  is_read boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS notifications_recipient_created_idx
+  ON public.notifications (recipient_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS notifications_recipient_unread_idx
+  ON public.notifications (recipient_id, is_read)
+  WHERE is_read = false;
+
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own notifications" ON public.notifications;
+CREATE POLICY "Users can view own notifications"
+  ON public.notifications FOR SELECT
+  USING (auth.uid() = recipient_id);
+
+DROP POLICY IF EXISTS "Users can mark own notifications read" ON public.notifications;
+CREATE POLICY "Users can mark own notifications read"
+  ON public.notifications FOR UPDATE
+  USING (auth.uid() = recipient_id)
+  WITH CHECK (auth.uid() = recipient_id);
+
+DROP POLICY IF EXISTS "Users can delete own notifications" ON public.notifications;
+CREATE POLICY "Users can delete own notifications"
+  ON public.notifications FOR DELETE
+  USING (auth.uid() = recipient_id);
+
+DROP POLICY IF EXISTS "Actors can insert notifications" ON public.notifications;
+CREATE POLICY "Actors can insert notifications"
+  ON public.notifications FOR INSERT
+  WITH CHECK (auth.uid() = actor_id AND actor_id <> recipient_id);
+
+-- Notify user when someone starts following them
+CREATE OR REPLACE FUNCTION public.notify_on_follow()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.subscriber_id <> NEW.target_user_id THEN
+    INSERT INTO public.notifications (recipient_id, actor_id, type)
+    VALUES (NEW.target_user_id, NEW.subscriber_id, 'follow');
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_notify_on_follow ON public.subscriptions;
+CREATE TRIGGER trg_notify_on_follow
+  AFTER INSERT ON public.subscriptions
+  FOR EACH ROW
+  EXECUTE FUNCTION public.notify_on_follow();
+
+-- Notify photo owner when someone likes their post
+CREATE OR REPLACE FUNCTION public.notify_on_like()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_owner uuid;
+BEGIN
+  SELECT user_id INTO v_owner
+  FROM public.photos
+  WHERE id = NEW.photo_id;
+
+  IF v_owner IS NOT NULL AND v_owner <> NEW.user_id THEN
+    INSERT INTO public.notifications (recipient_id, actor_id, type, photo_id)
+    VALUES (v_owner, NEW.user_id, 'like', NEW.photo_id);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_notify_on_like ON public.photo_likes;
+CREATE TRIGGER trg_notify_on_like
+  AFTER INSERT ON public.photo_likes
+  FOR EACH ROW
+  EXECUTE FUNCTION public.notify_on_like();
+
+-- Notify followers when a followed user posts a visible photo
+CREATE OR REPLACE FUNCTION public.notify_on_new_post()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.privacy = 'public' OR NEW.privacy = 'followers' THEN
+    INSERT INTO public.notifications (recipient_id, actor_id, type, photo_id)
+    SELECT s.subscriber_id, NEW.user_id, 'new_post', NEW.id
+    FROM public.subscriptions s
+    WHERE s.target_user_id = NEW.user_id
+      AND s.subscriber_id <> NEW.user_id;
+  ELSIF NEW.privacy = 'limited' THEN
+    INSERT INTO public.notifications (recipient_id, actor_id, type, photo_id)
+    SELECT s.subscriber_id, NEW.user_id, 'new_post', NEW.id
+    FROM public.subscriptions s
+    WHERE s.target_user_id = NEW.user_id
+      AND s.subscriber_id <> NEW.user_id
+      AND s.subscriber_id = ANY(NEW.allowed_user_ids);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_notify_on_new_post ON public.photos;
+CREATE TRIGGER trg_notify_on_new_post
+  AFTER INSERT ON public.photos
+  FOR EACH ROW
+  EXECUTE FUNCTION public.notify_on_new_post();
+
+-- Enable realtime updates on notifications table safely
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_publication_tables
+      WHERE pubname = 'supabase_realtime'
+        AND schemaname = 'public'
+        AND tablename = 'notifications'
+    ) THEN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+    END IF;
+  END IF;
 END;
 $$;
 

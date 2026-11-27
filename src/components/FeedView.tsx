@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Check, Compass, Info, Link2, RefreshCw, Users } from 'lucide-react';
+import {
+  Bell,
+  Check,
+  Compass,
+  Globe,
+  Info,
+  Link2,
+  RefreshCw,
+  Users,
+  X,
+} from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { CinemaPhoto, PhotoWithAuthor } from '../types';
 import {
@@ -16,9 +26,14 @@ import { LikeButton } from './LikeButton';
 import { fetchPhotoLikesMap, togglePhotoLike } from '../lib/likes';
 import { APP_VERSION, RoadmapModal } from './RoadmapModal';
 import { RulesModal } from './RulesModal';
+import { SlidingTabs } from './SlidingTabs';
+import { NotificationsPanel } from './NotificationsPanel';
+import { ModalPortal } from './ModalPortal';
 
 interface FeedViewProps {
   currentUserId: string | null;
+  unreadNotificationsCount?: number;
+  onMarkedNotificationsRead?: () => void;
   onOpenCinema: (photo: CinemaPhoto, collectionItems?: CinemaPhoto[]) => void;
   onOpenPost: (photoId: string) => void;
   onOpenProfile: (userId: string) => void;
@@ -30,6 +45,8 @@ interface FeedViewProps {
 
 export const FeedView: React.FC<FeedViewProps> = ({
   currentUserId,
+  unreadNotificationsCount = 0,
+  onMarkedNotificationsRead,
   onOpenCinema,
   onOpenPost,
   onOpenProfile,
@@ -48,6 +65,16 @@ export const FeedView: React.FC<FeedViewProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [roadmapOpen, setRoadmapOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [mobileNotificationsOpen, setMobileNotificationsOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileNotificationsOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileNotificationsOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileNotificationsOpen]);
 
   const loadFeed = useCallback(async () => {
     setLoading(true);
@@ -202,45 +229,63 @@ export const FeedView: React.FC<FeedViewProps> = ({
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div className="flex items-center gap-2.5">
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-[#0A0A0A]">
-            Feed
-          </h1>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-[#0A0A0A]">
+              Feed
+            </h1>
+            <button
+              type="button"
+              onClick={() => setRoadmapOpen(true)}
+              aria-label={`Open roadmap (${APP_VERSION})`}
+              className="min-h-[30px] px-2.5 py-1 rounded-xl border border-black/[0.1] bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#525252] hover:text-[#0A0A0A] transition-colors tabular-nums"
+            >
+              {APP_VERSION}
+            </button>
+          </div>
+
+          {/* Mobile Notification Button (same line as Feed, right corner) */}
           <button
             type="button"
-            onClick={() => setRoadmapOpen(true)}
-            aria-label={`Open roadmap (${APP_VERSION})`}
-            className="min-h-[30px] px-2.5 py-1 rounded-xl border border-black/[0.1] bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#525252] hover:text-[#0A0A0A] transition-colors tabular-nums"
+            onClick={() => {
+              if (!currentUserId) {
+                onRequireAuth();
+                return;
+              }
+              setMobileNotificationsOpen(true);
+            }}
+            aria-label="Open notifications"
+            title="Notifications"
+            className="md:hidden relative min-h-[40px] min-w-[40px] flex items-center justify-center rounded-full bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A] transition-colors shrink-0"
           >
-            {APP_VERSION}
+            <Bell className="w-4 h-4" strokeWidth={1.75} />
+            {unreadNotificationsCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#0A0A0A] text-white text-[10px] font-semibold tabular-nums flex items-center justify-center border-2 border-white">
+                {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+              </span>
+            )}
           </button>
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          <div className="inline-flex items-center gap-1 p-1 bg-[#F5F5F7] rounded-xl">
-            <button
-              type="button"
-              onClick={() => setFeedFilter('all')}
-              className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-                feedFilter === 'all'
-                  ? 'bg-white text-[#0A0A0A] shadow-xs'
-                  : 'text-[#737373] hover:text-[#0A0A0A]'
-              }`}
-            >
-              All
-            </button>
-            <button
-              type="button"
-              onClick={() => setFeedFilter('following')}
-              className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-                feedFilter === 'following'
-                  ? 'bg-white text-[#0A0A0A] shadow-xs'
-                  : 'text-[#737373] hover:text-[#0A0A0A]'
-              }`}
-            >
-              Following
-            </button>
-          </div>
+          <SlidingTabs
+            value={feedFilter}
+            onChange={setFeedFilter}
+            items={[
+              {
+                id: 'all',
+                label: <Globe className="w-4 h-4" strokeWidth={1.85} />,
+                ariaLabel: 'All public photos',
+                title: 'All',
+              },
+              {
+                id: 'following',
+                label: <Users className="w-4 h-4" strokeWidth={1.85} />,
+                ariaLabel: 'Following feed',
+                title: 'Following',
+              },
+            ]}
+          />
 
           <button
             type="button"
@@ -272,188 +317,235 @@ export const FeedView: React.FC<FeedViewProps> = ({
         </div>
       )}
 
-      {loading && photos.length === 0 && (
-        <div className="space-y-10">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="space-y-3 animate-pulse">
-              <div className="aspect-[4/3] w-full rounded-2xl bg-[#F5F5F7]" />
-              <div className="h-4 w-48 rounded bg-[#F5F5F7]" />
-              <div className="h-3 w-32 rounded bg-[#F5F5F7]" />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {!loading && !error && feedFilter === 'following' && !currentUserId && (
-        <div className="py-16 px-6 text-center space-y-4 border border-black/[0.06] rounded-3xl bg-[#FAFAFA]">
-          <Users className="w-8 h-8 mx-auto text-[#737373]" strokeWidth={1.5} />
-          <div className="space-y-1">
-            <h2 className="text-base font-medium text-[#0A0A0A]">
-              Sign in to see your Following feed
-            </h2>
-            <p className="text-xs text-[#737373] max-w-xs mx-auto">
-              Subscribe to creators you like to view their latest public frames here.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onRequireAuth}
-            className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium hover:bg-black/85 transition-colors"
-          >
-            Sign In
-          </button>
-        </div>
-      )}
-
-      {!loading &&
-        !error &&
-        !(feedFilter === 'following' && !currentUserId) &&
-        photos.length === 0 && (
-          <div className="py-20 text-center space-y-3 border border-black/[0.06] rounded-3xl bg-[#FAFAFA]">
-            <Compass className="w-8 h-8 mx-auto text-[#737373]" strokeWidth={1.5} />
-            <h2 className="text-base font-medium text-[#0A0A0A]">
-              {feedFilter === 'following'
-                ? 'No photos from followed users yet'
-                : 'No public photos yet'}
-            </h2>
-            <p className="text-xs text-[#737373] max-w-xs mx-auto">
-              {feedFilter === 'following'
-                ? 'Follow creators from All or Search to fill this feed.'
-                : 'Upload a public photo from the Add tab to start the chronological feed.'}
-            </p>
+      <div key={feedFilter} className="animate-tab-panel">
+        {loading && photos.length === 0 && (
+          <div className="space-y-10">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="space-y-3 animate-pulse">
+                <div className="aspect-[4/3] w-full rounded-2xl bg-[#F5F5F7]" />
+                <div className="h-4 w-48 rounded bg-[#F5F5F7]" />
+                <div className="h-3 w-32 rounded bg-[#F5F5F7]" />
+              </div>
+            ))}
           </div>
         )}
 
-      <div className="space-y-10">
-        {(() => {
-          const cinemaList: CinemaPhoto[] = photos.map((p) => ({
-            id: p.id,
-            title: p.title,
-            image_url: p.image_url,
-            subtitle: p.profiles ? `${p.profiles.name} · @${p.profiles.username}` : undefined,
-          }));
-          return photos.map((photo, idx) => {
-            const author = photo.profiles;
-            return (
-              <article
-                key={photo.id}
-                className="pb-8 border-b border-black/[0.08] last:border-b-0"
-              >
-                {/* Photo — clicking opens Cinema view */}
+        {!loading && !error && feedFilter === 'following' && !currentUserId && (
+          <div className="py-16 px-6 text-center space-y-4 border border-black/[0.06] rounded-3xl bg-[#FAFAFA]">
+            <Users className="w-8 h-8 mx-auto text-[#737373]" strokeWidth={1.5} />
+            <div className="space-y-1">
+              <h2 className="text-base font-medium text-[#0A0A0A]">
+                Sign in to see your Following feed
+              </h2>
+              <p className="text-xs text-[#737373] max-w-xs mx-auto">
+                Follow creators you like to view their latest frames here.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onRequireAuth}
+              className="min-h-[44px] px-5 py-2.5 rounded-xl bg-[#0A0A0A] text-white text-xs font-medium hover:bg-black/85 transition-colors"
+            >
+              Sign In
+            </button>
+          </div>
+        )}
+
+        {!loading &&
+          !error &&
+          !(feedFilter === 'following' && !currentUserId) &&
+          photos.length === 0 && (
+            <div className="py-20 text-center space-y-3 border border-black/[0.06] rounded-3xl bg-[#FAFAFA]">
+              <Compass className="w-8 h-8 mx-auto text-[#737373]" strokeWidth={1.5} />
+              <h2 className="text-base font-medium text-[#0A0A0A]">
+                {feedFilter === 'following'
+                  ? 'No photos from followed users yet'
+                  : 'No public photos yet'}
+              </h2>
+              <p className="text-xs text-[#737373] max-w-xs mx-auto">
+                {feedFilter === 'following'
+                  ? 'Follow creators from All or Search to fill this feed.'
+                  : 'Upload a public photo from the Add tab to start the chronological feed.'}
+              </p>
+            </div>
+          )}
+
+        <div className="space-y-10">
+          {(() => {
+            const cinemaList: CinemaPhoto[] = photos.map((p) => ({
+              id: p.id,
+              title: p.title,
+              image_url: p.image_url,
+              subtitle: p.profiles ? `${p.profiles.name} · @${p.profiles.username}` : undefined,
+            }));
+            return photos.map((photo, idx) => {
+              const author = photo.profiles;
+              return (
+                <article
+                  key={photo.id}
+                  className="pb-8 border-b border-black/[0.08] last:border-b-0"
+                >
+                  {/* Photo — clicking opens Cinema view */}
+                  <button
+                    type="button"
+                    onClick={() => onOpenCinema(cinemaList[idx], cinemaList)}
+                    className="block w-full text-left group rounded-2xl overflow-hidden focus-visible:outline-2 focus-visible:outline-black"
+                  >
+                    <ResilientImage
+                      src={photo.image_url}
+                      alt={photo.title}
+                      containerClassName="w-full aspect-[4/3] sm:aspect-[16/11] rounded-2xl border border-black/[0.06]"
+                      className="w-full h-full object-cover group-hover:scale-[1.01] transition-transform duration-300"
+                    />
+                  </button>
+
+                  {/* Below photo: Post Name, Like Button & Profile Link */}
+                  <div className="mt-3.5 space-y-2.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => onOpenPost(photo.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            onOpenPost(photo.id);
+                          }
+                        }}
+                        className="text-base font-medium text-[#0A0A0A] hover:opacity-75 transition-opacity cursor-pointer leading-snug min-w-0 pt-1"
+                      >
+                        <MentionText
+                          text={photo.title}
+                          onMentionClick={onOpenProfileByUsername}
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const ok = await copyTextToClipboard(getPhotoShareUrl(photo.id));
+                            if (ok) {
+                              setCopiedId(photo.id);
+                              onShowToast?.('Photo link copied');
+                              setTimeout(() => {
+                                setCopiedId((prev) => (prev === photo.id ? null : prev));
+                              }, 2000);
+                            }
+                          }}
+                          aria-label={`Copy link for ${photo.title}`}
+                          className="min-h-[38px] min-w-[38px] px-2.5 py-1.5 rounded-xl border border-black/[0.08] bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
+                        >
+                          {copiedId === photo.id ? (
+                            <Check className="w-4 h-4" strokeWidth={2} />
+                          ) : (
+                            <Link2 className="w-4 h-4" strokeWidth={1.75} />
+                          )}
+                        </button>
+
+                        <LikeButton
+                          liked={likedIds.has(photo.id)}
+                          count={likeCounts[photo.id] || 0}
+                          busy={likeBusyIds.has(photo.id)}
+                          onToggle={() => handleToggleLike(photo)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3 text-xs text-[#737373]">
+                      {author ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenProfile(author.id)}
+                          className="flex items-center gap-2 hover:text-[#0A0A0A] transition-colors min-w-0"
+                        >
+                          {author.avatar_url ? (
+                            <img
+                              src={author.avatar_url}
+                              alt={author.name}
+                              referrerPolicy="no-referrer"
+                              className="w-5 h-5 rounded-full object-cover border border-black/[0.08] shrink-0"
+                            />
+                          ) : (
+                            <span className="w-5 h-5 rounded-full bg-[#0A0A0A] text-white text-[9px] font-medium flex items-center justify-center shrink-0">
+                              {getInitials(author.name)}
+                            </span>
+                          )}
+                          <span className="font-medium text-[#0A0A0A] truncate">
+                            {author.name}
+                          </span>
+                          <VerifiedBadge
+                            username={author.username}
+                            isVerified={author.is_verified}
+                          />
+                          <span className="truncate">@{author.username}</span>
+                        </button>
+                      ) : (
+                        <span>StartOrigin Creator</span>
+                      )}
+
+                      <span className="tabular-nums shrink-0">
+                        {photo.privacy === 'followers'
+                          ? 'Followers · '
+                          : photo.privacy === 'limited'
+                          ? 'Limited · '
+                          : ''}
+                        {formatDate(photo.photo_date || photo.created_at)}
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              );
+            });
+          })()}
+        </div>
+      </div>
+
+      {/* Mobile Notifications Modal */}
+      {mobileNotificationsOpen && currentUserId && (
+        <ModalPortal>
+          <div
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-modal-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Notifications"
+            onClick={() => setMobileNotificationsOpen(false)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md max-h-[85vh] flex flex-col bg-white border border-black/[0.08] rounded-3xl p-5 space-y-4 shadow-2xl animate-modal-pop"
+            >
+              <div className="flex items-center justify-between gap-3 shrink-0">
+                <h2 className="text-base font-semibold text-[#0A0A0A]">
+                  Notifications
+                </h2>
                 <button
                   type="button"
-                  onClick={() => onOpenCinema(cinemaList[idx], cinemaList)}
-                  className="block w-full text-left group rounded-2xl overflow-hidden focus-visible:outline-2 focus-visible:outline-black"
+                  onClick={() => setMobileNotificationsOpen(false)}
+                  aria-label="Close notifications"
+                  className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-full bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A] transition-colors"
                 >
-                <ResilientImage
-                  src={photo.image_url}
-                  alt={photo.title}
-                  containerClassName="w-full aspect-[4/3] sm:aspect-[16/11] rounded-2xl border border-black/[0.06]"
-                  className="w-full h-full object-cover group-hover:scale-[1.01] transition-transform duration-300"
-                />
-              </button>
-
-              {/* Below photo: Post Name (opens Post Page; @mentions open User Profile), Like Button Container & Profile Link */}
-              <div className="mt-3.5 space-y-2.5">
-                <div className="flex items-start justify-between gap-3">
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onOpenPost(photo.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        onOpenPost(photo.id);
-                      }
-                    }}
-                    className="text-base font-medium text-[#0A0A0A] hover:opacity-75 transition-opacity cursor-pointer leading-snug min-w-0 pt-1"
-                  >
-                    <MentionText
-                      text={photo.title}
-                      onMentionClick={onOpenProfileByUsername}
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        const ok = await copyTextToClipboard(getPhotoShareUrl(photo.id));
-                        if (ok) {
-                          setCopiedId(photo.id);
-                          onShowToast?.('Photo link copied');
-                          setTimeout(() => {
-                            setCopiedId((prev) => (prev === photo.id ? null : prev));
-                          }, 2000);
-                        }
-                      }}
-                      aria-label={`Copy link for ${photo.title}`}
-                      className="min-h-[38px] min-w-[38px] px-2.5 py-1.5 rounded-xl border border-black/[0.08] bg-[#F5F5F7] hover:bg-black/[0.08] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
-                    >
-                      {copiedId === photo.id ? (
-                        <Check className="w-4 h-4" strokeWidth={2} />
-                      ) : (
-                        <Link2 className="w-4 h-4" strokeWidth={1.75} />
-                      )}
-                    </button>
-
-                    <LikeButton
-                      liked={likedIds.has(photo.id)}
-                      count={likeCounts[photo.id] || 0}
-                      busy={likeBusyIds.has(photo.id)}
-                      onToggle={() => handleToggleLike(photo)}
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between gap-3 text-xs text-[#737373]">
-                  {author ? (
-                    <button
-                      type="button"
-                      onClick={() => onOpenProfile(author.id)}
-                      className="flex items-center gap-2 hover:text-[#0A0A0A] transition-colors min-w-0"
-                    >
-                      {author.avatar_url ? (
-                        <img
-                          src={author.avatar_url}
-                          alt={author.name}
-                          referrerPolicy="no-referrer"
-                          className="w-5 h-5 rounded-full object-cover border border-black/[0.08] shrink-0"
-                        />
-                      ) : (
-                        <span className="w-5 h-5 rounded-full bg-[#0A0A0A] text-white text-[9px] font-medium flex items-center justify-center shrink-0">
-                          {getInitials(author.name)}
-                        </span>
-                      )}
-                      <span className="font-medium text-[#0A0A0A] truncate">
-                        {author.name}
-                      </span>
-                      <VerifiedBadge
-                        username={author.username}
-                        isVerified={author.is_verified}
-                      />
-                      <span className="truncate">@{author.username}</span>
-                    </button>
-                  ) : (
-                    <span>StartOrigin Creator</span>
-                  )}
-
-                  <span className="tabular-nums shrink-0">
-                    {photo.privacy === 'followers'
-                      ? 'Followers · '
-                      : photo.privacy === 'limited'
-                      ? 'Limited · '
-                      : ''}
-                    {formatDate(photo.photo_date || photo.created_at)}
-                  </span>
-                </div>
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              </article>
-            );
-          });
-        })()}
-      </div>
+
+              <div className="flex-1 overflow-y-auto pr-0.5">
+                <NotificationsPanel
+                  compact
+                  currentUserId={currentUserId}
+                  onOpenProfile={onOpenProfile}
+                  onOpenPost={onOpenPost}
+                  onShowToast={onShowToast}
+                  onMarkedRead={onMarkedNotificationsRead}
+                  onCloseModal={() => setMobileNotificationsOpen(false)}
+                  refreshKey={refreshKey}
+                />
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
 
       <RoadmapModal isOpen={roadmapOpen} onClose={() => setRoadmapOpen(false)} />
       <RulesModal isOpen={rulesOpen} onClose={() => setRulesOpen(false)} />

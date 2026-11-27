@@ -39,6 +39,7 @@ import { ResilientImage } from './ResilientImage';
 import { AddPhotoModal } from './AddPhotoModal';
 import { RulesModal } from './RulesModal';
 import { LimitedUsersPicker } from './LimitedUsersPicker';
+import { ModalPortal } from './ModalPortal';
 
 interface GalleryViewProps {
   currentUserId: string | null;
@@ -78,6 +79,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   const [photoPrivacyTarget, setPhotoPrivacyTarget] = useState<Photo | null>(null);
   const [photoPrivacyValue, setPhotoPrivacyValue] = useState<PhotoPrivacy>('public');
   const [photoAllowedIds, setPhotoAllowedIds] = useState<string[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<Photo | null>(null);
 
   // Collection action modals
   const [colRenameTarget, setColRenameTarget] = useState<Collection | null>(null);
@@ -85,6 +87,8 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
   const [colPrivacyTarget, setColPrivacyTarget] = useState<Collection | null>(null);
   const [colPrivacyValue, setColPrivacyValue] = useState<CollectionPrivacy>('public');
   const [colAllowedIds, setColAllowedIds] = useState<string[]>([]);
+  const [colDeleteTarget, setColDeleteTarget] = useState<Collection | null>(null);
+  const [colDeletePhotosToo, setColDeletePhotosToo] = useState(false);
 
   const [modalError, setModalError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
@@ -181,6 +185,13 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
     );
   }
 
+  const selectCollection = (collectionId: string | null) => {
+    setMenuOpenId(null);
+    setColMenuOpenId(null);
+    setSelectedCollectionId(collectionId);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const activeCollection = collections.find((c) => c.id === selectedCollectionId) || null;
   const collectionPhotos = selectedCollectionId
     ? filteredPhotos.filter((p) => p.collection_id === selectedCollectionId)
@@ -199,7 +210,9 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
         .eq('user_id', currentUserId);
       if (!error) {
         setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+        setDeleteTarget(null);
         onDataChanged();
+        onShowToast?.('Photo deleted');
       }
     } finally {
       setActionBusy(false);
@@ -371,6 +384,75 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
     }
   };
 
+  const handleDeleteCollection = async (col: Collection) => {
+    if (!currentUserId) return;
+    setActionBusy(true);
+    setModalError(null);
+    try {
+      const insidePhotos = photos.filter((p) => p.collection_id === col.id);
+
+      if (colDeletePhotosToo && insidePhotos.length > 0) {
+        const storagePaths = insidePhotos
+          .map((p) => p.storage_path)
+          .filter((p): p is string => Boolean(p));
+        if (storagePaths.length > 0) {
+          await supabase.storage.from('photos').remove(storagePaths);
+        }
+
+        const { error: photosDelErr } = await supabase
+          .from('photos')
+          .delete()
+          .eq('collection_id', col.id)
+          .eq('user_id', currentUserId);
+        if (photosDelErr) {
+          setModalError(photosDelErr.message);
+          return;
+        }
+      } else if (insidePhotos.length > 0) {
+        const { error: unlinkErr } = await supabase
+          .from('photos')
+          .update({ collection_id: null })
+          .eq('collection_id', col.id)
+          .eq('user_id', currentUserId);
+        if (unlinkErr) {
+          setModalError(unlinkErr.message);
+          return;
+        }
+      }
+
+      const { error } = await supabase
+        .from('collections')
+        .delete()
+        .eq('id', col.id)
+        .eq('user_id', currentUserId);
+
+      if (error) {
+        setModalError(error.message);
+        return;
+      }
+
+      setCollections((prev) => prev.filter((c) => c.id !== col.id));
+      if (colDeletePhotosToo) {
+        setPhotos((prev) => prev.filter((p) => p.collection_id !== col.id));
+      } else {
+        setPhotos((prev) =>
+          prev.map((p) => (p.collection_id === col.id ? { ...p, collection_id: null } : p))
+        );
+      }
+
+      if (selectedCollectionId === col.id) {
+        selectCollection(null);
+      }
+      setColDeleteTarget(null);
+      onDataChanged();
+      onShowToast?.(
+        colDeletePhotosToo ? 'Collection and its photos deleted' : 'Collection deleted'
+      );
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
   const handleCopyPhotoLink = async (photo: Photo) => {
     const ok = await copyTextToClipboard(getPhotoShareUrl(photo.id));
     setMenuOpenId(null);
@@ -404,8 +486,9 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
     )}`,
   });
 
-  const renderPhotoCard = (photo: Photo, swipeList?: Photo[]) => {
+  const renderPhotoCard = (photo: Photo, idx: number, swipeList?: Photo[]) => {
     const isMenuOpen = menuOpenId === photo.id;
+    const isLeftColumnMobile = idx % 2 === 0;
     return (
       <div key={photo.id} className="group relative">
         {/* Click photo -> Cinema experience */}
@@ -445,7 +528,9 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
         {isMenuOpen && (
           <div
             onClick={(e) => e.stopPropagation()}
-            className="absolute top-12 right-2.5 z-20 w-52 bg-white border border-black/[0.1] rounded-2xl shadow-xl p-1.5 space-y-0.5"
+            className={`absolute top-12 ${
+              isLeftColumnMobile ? 'left-2.5 sm:left-auto sm:right-2.5' : 'right-2.5'
+            } z-20 w-52 max-w-[calc(100vw-2rem)] bg-white border border-black/[0.1] rounded-2xl shadow-xl p-1.5 space-y-0.5 animate-popover-in`}
           >
             <button
               type="button"
@@ -501,7 +586,10 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
 
             <button
               type="button"
-              onClick={() => handleDeletePhoto(photo)}
+              onClick={() => {
+                setMenuOpenId(null);
+                setDeleteTarget(photo);
+              }}
               disabled={actionBusy}
               className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-red-600 hover:bg-red-50 flex items-center gap-2.5 text-left"
             >
@@ -533,6 +621,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+      <div key={selectedCollectionId || 'overview'} className="animate-tab-panel">
       {/* Header */}
       <div className="mb-6">
         {selectedCollectionId && activeCollection ? (
@@ -540,14 +629,14 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <button
                 type="button"
-                onClick={() => setSelectedCollectionId(null)}
+                onClick={() => selectCollection(null)}
                 className="min-h-[44px] px-4 py-2 rounded-xl bg-[#F5F5F7] hover:bg-black/[0.08] text-xs font-medium text-[#0A0A0A] inline-flex items-center gap-2 transition-colors"
               >
                 <ArrowLeft className="w-4 h-4" strokeWidth={1.75} />
                 <span>Go Back</span>
               </button>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="relative flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() =>
@@ -562,58 +651,83 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => handleCopyCollectionLink(activeCollection)}
-                  aria-label="Copy collection link"
-                  title="Copy link"
-                  className="min-h-[40px] min-w-[40px] p-2.5 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
-                >
-                  <Link2 className="w-4 h-4" strokeWidth={1.75} />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setModalError(null);
-                    setColPrivacyTarget(activeCollection);
-                    setColPrivacyValue(activeCollection.privacy || 'public');
-                    setColAllowedIds(
-                      Array.isArray(activeCollection.allowed_user_ids)
-                        ? activeCollection.allowed_user_ids
-                        : []
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuOpenId(null);
+                    setColMenuOpenId(
+                      colMenuOpenId === activeCollection.id ? null : activeCollection.id
                     );
                   }}
-                  aria-label={`Collection privacy: ${getVisibilityLabel(
-                    activeCollection.privacy || 'public'
-                  )}`}
-                  title={`Privacy: ${getVisibilityLabel(activeCollection.privacy || 'public')}`}
+                  aria-label={`Collection options for ${activeCollection.name}`}
+                  title="Collection options"
                   className="min-h-[40px] min-w-[40px] p-2.5 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
                 >
-                  {renderPrivacyIcon(activeCollection.privacy || 'public')}
+                  <MoreHorizontal className="w-4 h-4" />
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setModalError(null);
-                    setColRenameTarget(activeCollection);
-                    setColRenameValue(activeCollection.name);
-                  }}
-                  aria-label="Rename collection"
-                  title="Rename"
-                  className="min-h-[40px] min-w-[40px] p-2.5 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
-                >
-                  <Pencil className="w-4 h-4" strokeWidth={1.75} />
-                </button>
+                {colMenuOpenId === activeCollection.id && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute top-12 right-0 z-20 w-52 bg-white border border-black/[0.1] rounded-2xl shadow-xl p-1.5 space-y-0.5 animate-popover-in"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleCopyCollectionLink(activeCollection)}
+                      className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-[#0A0A0A] hover:bg-[#F5F5F7] flex items-center gap-2.5 text-left"
+                    >
+                      <Link2 className="w-3.5 h-3.5" />
+                      <span>Copy Link</span>
+                    </button>
 
-                <button
-                  type="button"
-                  onClick={() => setRulesOpen(true)}
-                  aria-label="Open StartOrigin rules"
-                  title="Rules"
-                  className="min-h-[40px] min-w-[40px] p-2.5 rounded-xl border border-black/[0.1] bg-white hover:bg-[#F5F5F7] text-[#0A0A0A] inline-flex items-center justify-center transition-colors"
-                >
-                  <Info className="w-4 h-4" strokeWidth={1.75} />
-                </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setColMenuOpenId(null);
+                        setModalError(null);
+                        setColPrivacyTarget(activeCollection);
+                        setColPrivacyValue(activeCollection.privacy || 'public');
+                        setColAllowedIds(
+                          Array.isArray(activeCollection.allowed_user_ids)
+                            ? activeCollection.allowed_user_ids
+                            : []
+                        );
+                      }}
+                      className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-[#0A0A0A] hover:bg-[#F5F5F7] flex items-center gap-2.5 text-left"
+                    >
+                      {renderPrivacyIcon(activeCollection.privacy || 'public')}
+                      <span>Change Privacy</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setColMenuOpenId(null);
+                        setModalError(null);
+                        setColRenameTarget(activeCollection);
+                        setColRenameValue(activeCollection.name);
+                      }}
+                      className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-[#0A0A0A] hover:bg-[#F5F5F7] flex items-center gap-2.5 text-left"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span>Rename Collection</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setColMenuOpenId(null);
+                        setModalError(null);
+                        setColDeletePhotosToo(false);
+                        setColDeleteTarget(activeCollection);
+                      }}
+                      disabled={actionBusy}
+                      className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-red-600 hover:bg-red-50 flex items-center gap-2.5 text-left"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Collection</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -713,7 +827,9 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            {collectionPhotos.map((photo) => renderPhotoCard(photo, collectionPhotos))}
+            {collectionPhotos.map((photo, idx) =>
+              renderPhotoCard(photo, idx, collectionPhotos)
+            )}
           </div>
         )
       ) : (
@@ -749,7 +865,9 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-                {unsortedPhotos.map((photo) => renderPhotoCard(photo, unsortedPhotos))}
+                {unsortedPhotos.map((photo, idx) =>
+                  renderPhotoCard(photo, idx, unsortedPhotos)
+                )}
               </div>
             )}
           </section>
@@ -783,7 +901,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                     >
                       <button
                         type="button"
-                        onClick={() => setSelectedCollectionId(col.id)}
+                        onClick={() => selectCollection(col.id)}
                         className="block w-full text-left"
                       >
                         <div className="grid grid-cols-2 gap-1.5 aspect-[4/3] rounded-2xl overflow-hidden bg-[#F5F5F7] mb-3">
@@ -822,7 +940,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                       {isColMenuOpen && (
                         <div
                           onClick={(e) => e.stopPropagation()}
-                          className="absolute top-15 right-5 z-20 w-52 bg-white border border-black/[0.1] rounded-2xl shadow-xl p-1.5 space-y-0.5"
+                          className="absolute top-15 right-5 z-20 w-52 bg-white border border-black/[0.1] rounded-2xl shadow-xl p-1.5 space-y-0.5 animate-popover-in"
                         >
                           <button
                             type="button"
@@ -865,13 +983,28 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                             <Pencil className="w-3.5 h-3.5" />
                             <span>Rename Collection</span>
                           </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setColMenuOpenId(null);
+                              setModalError(null);
+                              setColDeletePhotosToo(false);
+                              setColDeleteTarget(col);
+                            }}
+                            disabled={actionBusy}
+                            className="w-full min-h-[38px] px-3 py-2 rounded-xl text-xs font-medium text-red-600 hover:bg-red-50 flex items-center gap-2.5 text-left"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Delete Collection</span>
+                          </button>
                         </div>
                       )}
 
                       <div className="flex items-center justify-between gap-2 px-1">
                         <button
                           type="button"
-                          onClick={() => setSelectedCollectionId(col.id)}
+                          onClick={() => selectCollection(col.id)}
                           className="min-w-0 flex-1 text-left"
                         >
                           <h3 className="text-sm font-semibold text-[#0A0A0A] truncate">
@@ -885,33 +1018,18 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                           </p>
                         </button>
 
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setRulesOpen(true);
-                            }}
-                            aria-label="Open StartOrigin rules"
-                            title="Rules"
-                            className="min-h-[36px] min-w-[36px] p-2 rounded-xl bg-white border border-black/[0.1] hover:bg-black/[0.05] text-[#0A0A0A] inline-flex items-center justify-center transition-colors shrink-0"
-                          >
-                            <Info className="w-4 h-4" strokeWidth={1.75} />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setAddModalState({ open: true, collectionId: col.id });
-                            }}
-                            aria-label={`Add photo to ${col.name}`}
-                            title="Add photo"
-                            className="min-h-[36px] min-w-[36px] p-2 rounded-xl bg-white border border-black/[0.1] hover:bg-[#0A0A0A] hover:text-white hover:border-[#0A0A0A] text-[#0A0A0A] inline-flex items-center justify-center transition-colors shrink-0"
-                          >
-                            <Plus className="w-4 h-4" strokeWidth={2} />
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAddModalState({ open: true, collectionId: col.id });
+                          }}
+                          aria-label={`Add photo to ${col.name}`}
+                          title="Add photo"
+                          className="min-h-[36px] min-w-[36px] p-2 rounded-xl bg-white border border-black/[0.1] hover:bg-[#0A0A0A] hover:text-white hover:border-[#0A0A0A] text-[#0A0A0A] inline-flex items-center justify-center transition-colors shrink-0"
+                        >
+                          <Plus className="w-4 h-4" strokeWidth={2} />
+                        </button>
                       </div>
                     </div>
                   );
@@ -921,17 +1039,64 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
           </section>
         </div>
       )}
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteTarget && (
+        <ModalPortal>
+        <div
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm delete photo"
+          onClick={() => !actionBusy && setDeleteTarget(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl animate-modal-pop"
+          >
+            <div className="space-y-1.5">
+              <h2 className="text-base font-semibold text-[#0A0A0A]">Are you sure?</h2>
+              <p className="text-xs text-[#737373] leading-relaxed">
+                This action can&apos;t be undone.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={actionBusy}
+                onClick={() => setDeleteTarget(null)}
+                className="min-h-[40px] px-4 py-2 rounded-xl text-xs font-medium text-[#525252] hover:bg-[#F5F5F7] transition-colors disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={actionBusy}
+                onClick={() => handleDeletePhoto(deleteTarget)}
+                className="min-h-[40px] px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-medium transition-colors disabled:opacity-40"
+              >
+                {actionBusy ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+        </ModalPortal>
+      )}
 
       {/* Rename Modal */}
       {renameTarget && (
+        <ModalPortal>
         <div
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-modal-backdrop"
           role="dialog"
           aria-modal="true"
+          onClick={() => setRenameTarget(null)}
         >
           <form
             onSubmit={handleRenameSubmit}
-            className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl animate-modal-pop"
           >
             <h2 className="text-base font-semibold text-[#0A0A0A]">Rename Photo</h2>
             <input
@@ -959,18 +1124,22 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             </div>
           </form>
         </div>
+        </ModalPortal>
       )}
 
       {/* Move to Collection Modal */}
       {moveTarget && (
+        <ModalPortal>
         <div
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-modal-backdrop"
           role="dialog"
           aria-modal="true"
+          onClick={() => setMoveTarget(null)}
         >
           <form
             onSubmit={handleMoveSubmit}
-            className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl animate-modal-pop"
           >
             <h2 className="text-base font-semibold text-[#0A0A0A]">
               Move &ldquo;{moveTarget.title}&rdquo;
@@ -1005,18 +1174,22 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             </div>
           </form>
         </div>
+        </ModalPortal>
       )}
 
       {/* Photo Privacy Modal */}
       {photoPrivacyTarget && (
+        <ModalPortal>
         <div
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-modal-backdrop"
           role="dialog"
           aria-modal="true"
+          onClick={() => setPhotoPrivacyTarget(null)}
         >
           <form
             onSubmit={handlePhotoPrivacySubmit}
-            className="w-full max-w-md max-h-[85vh] overflow-y-auto bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md max-h-[85vh] overflow-y-auto bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl animate-modal-pop"
           >
             <h2 className="text-base font-semibold text-[#0A0A0A]">
               Privacy for &ldquo;{photoPrivacyTarget.title}&rdquo;
@@ -1037,7 +1210,7 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
                   {
                     value: 'followers',
                     label: 'Followers',
-                    desc: 'Visible only to users subscribed to you',
+                    desc: 'Visible only to your followers',
                   },
                   {
                     value: 'limited',
@@ -1102,18 +1275,22 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             </div>
           </form>
         </div>
+        </ModalPortal>
       )}
 
       {/* Collection Rename Modal */}
       {colRenameTarget && (
+        <ModalPortal>
         <div
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-modal-backdrop"
           role="dialog"
           aria-modal="true"
+          onClick={() => setColRenameTarget(null)}
         >
           <form
             onSubmit={handleColRenameSubmit}
-            className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl animate-modal-pop"
           >
             <h2 className="text-base font-semibold text-[#0A0A0A]">Rename Collection</h2>
             {modalError && (
@@ -1146,18 +1323,22 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             </div>
           </form>
         </div>
+        </ModalPortal>
       )}
 
       {/* Collection Privacy Modal */}
       {colPrivacyTarget && (
+        <ModalPortal>
         <div
-          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-modal-backdrop"
           role="dialog"
           aria-modal="true"
+          onClick={() => setColPrivacyTarget(null)}
         >
           <form
             onSubmit={handleColPrivacySubmit}
-            className="w-full max-w-md max-h-[85vh] overflow-y-auto bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md max-h-[85vh] overflow-y-auto bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl animate-modal-pop"
           >
             <h2 className="text-base font-semibold text-[#0A0A0A]">
               Privacy for &ldquo;{colPrivacyTarget.name}&rdquo;
@@ -1243,6 +1424,82 @@ export const GalleryView: React.FC<GalleryViewProps> = ({
             </div>
           </form>
         </div>
+        </ModalPortal>
+      )}
+
+      {/* Collection Delete Confirmation Modal */}
+      {colDeleteTarget && (
+        <ModalPortal>
+          <div
+            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-modal-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirm delete collection"
+            onClick={() => !actionBusy && setColDeleteTarget(null)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-4 shadow-2xl animate-modal-pop"
+            >
+              <div className="space-y-1.5">
+                <h2 className="text-base font-semibold text-[#0A0A0A]">Are you sure?</h2>
+                <p className="text-xs text-[#737373] leading-relaxed">
+                  Deleting &ldquo;{colDeleteTarget.name}&rdquo; can&apos;t be undone.
+                </p>
+              </div>
+
+              {modalError && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700">
+                  {modalError}
+                </div>
+              )}
+
+              {(() => {
+                const count = photos.filter((p) => p.collection_id === colDeleteTarget.id).length;
+                if (count === 0) return null;
+                return (
+                  <label className="flex items-start gap-2.5 p-3 rounded-2xl bg-[#FAFAFA] border border-black/[0.08] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={colDeletePhotosToo}
+                      onChange={(e) => setColDeletePhotosToo(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded accent-[#0A0A0A]"
+                    />
+                    <span className="text-xs leading-snug">
+                      <span className="font-medium text-[#0A0A0A] block">
+                        Also delete {count} {count === 1 ? 'photo' : 'photos'} inside
+                      </span>
+                      <span className="text-[11px] text-[#737373]">
+                        {colDeletePhotosToo
+                          ? 'Photos inside will be permanently deleted.'
+                          : 'Leave unchecked to move photos to Unsorted.'}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })()}
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={actionBusy}
+                  onClick={() => setColDeleteTarget(null)}
+                  className="min-h-[40px] px-4 py-2 rounded-xl text-xs font-medium text-[#525252] hover:bg-[#F5F5F7] transition-colors disabled:opacity-40"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={actionBusy}
+                  onClick={() => handleDeleteCollection(colDeleteTarget)}
+                  className="min-h-[40px] px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-medium transition-colors disabled:opacity-40"
+                >
+                  {actionBusy ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
       )}
 
       {/* Add Photo to Unsorted or Collection Modal */}

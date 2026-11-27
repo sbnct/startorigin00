@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { CheckCircle2, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { SwipeCaptcha } from './SwipeCaptcha';
+import { SlidingTabs } from './SlidingTabs';
+import { ModalPortal } from './ModalPortal';
 
 interface AuthViewProps {
   onSuccess: () => void;
@@ -193,7 +195,12 @@ export const AuthView: React.FC<AuthViewProps> = ({
   };
 
   const card = (
-    <div className="w-full max-w-md bg-white border border-black/[0.08] rounded-3xl p-6 sm:p-8 shadow-sm">
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className={`w-full max-w-md bg-white border border-black/[0.08] rounded-3xl p-6 sm:p-8 shadow-sm ${
+        embedded ? '' : 'shadow-2xl animate-modal-pop'
+      }`}
+    >
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[#0A0A0A]">
@@ -216,39 +223,22 @@ export const AuthView: React.FC<AuthViewProps> = ({
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-1 p-1 bg-[#F5F5F7] rounded-xl mb-6">
-        <button
-          type="button"
-          onClick={() => {
-            setMode('signin');
+      <div className="mb-6">
+        <SlidingTabs
+          value={mode}
+          onChange={(nextMode) => {
+            setMode(nextMode);
             setError(null);
             setInfoMessage(null);
             resetCaptcha();
           }}
-          className={`min-h-[38px] rounded-lg text-xs font-medium transition-all ${
-            mode === 'signin'
-              ? 'bg-white text-[#0A0A0A] shadow-xs'
-              : 'text-[#737373] hover:text-[#0A0A0A]'
-          }`}
-        >
-          Sign In
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setMode('signup');
-            setError(null);
-            setInfoMessage(null);
-            resetCaptcha();
-          }}
-          className={`min-h-[38px] rounded-lg text-xs font-medium transition-all ${
-            mode === 'signup'
-              ? 'bg-white text-[#0A0A0A] shadow-xs'
-              : 'text-[#737373] hover:text-[#0A0A0A]'
-          }`}
-        >
-          Sign Up
-        </button>
+          fullWidth
+          buttonClassName="min-h-[38px] text-xs"
+          items={[
+            { id: 'signin', label: 'Sign In' },
+            { id: 'signup', label: 'Sign Up' },
+          ]}
+        />
       </div>
 
       {error && (
@@ -264,6 +254,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
         </div>
       )}
 
+      <div key={mode} className="animate-tab-panel">
       {mode === 'signin' ? (
         <form onSubmit={handleSignIn} className="space-y-4">
           <div>
@@ -400,6 +391,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
           </button>
         </form>
       )}
+      </div>
     </div>
   );
 
@@ -410,12 +402,15 @@ export const AuthView: React.FC<AuthViewProps> = ({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
-      role="dialog"
-      aria-modal="true"
-    >
-      {card}
-    </div>
+    <ModalPortal>
+      <div
+        className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-modal-backdrop"
+        role="dialog"
+        aria-modal="true"
+        onClick={onClose}
+      >
+        {card}
+      </div>
+    </ModalPortal>
   );
 };

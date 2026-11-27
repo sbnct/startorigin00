@@ -15,6 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { AchievementIconKey, AchievementStatus } from '../lib/achievements';
+import { ModalPortal } from './ModalPortal';
 
 function renderIconSymbol(icon: AchievementIconKey, className: string) {
   switch (icon) {
@@ -106,8 +107,9 @@ export const AchievementDetailModal: React.FC<AchievementDetailModalProps> = ({
   const { definition, unlocked, progressPct, progressText } = status;
 
   return (
+    <ModalPortal>
     <div
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 animate-modal-backdrop"
       role="dialog"
       aria-modal="true"
       aria-label={`${definition.name} achievement details`}
@@ -115,19 +117,14 @@ export const AchievementDetailModal: React.FC<AchievementDetailModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-5 shadow-2xl"
+        className="w-full max-w-sm bg-white border border-black/[0.08] rounded-3xl p-6 space-y-5 shadow-2xl animate-modal-pop"
       >
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3.5 min-w-0">
             <AchievementBadgeIcon status={status} size="lg" />
-            <div className="min-w-0">
-              <h2 className="text-base font-semibold text-[#0A0A0A] truncate">
-                {definition.name}
-              </h2>
-              <p className="text-xs text-[#737373] mt-0.5">
-                {definition.category} · {definition.tier}
-              </p>
-            </div>
+            <h2 className="text-base font-semibold text-[#0A0A0A] truncate min-w-0">
+              {definition.name}
+            </h2>
           </div>
 
           <button
@@ -194,5 +191,6 @@ export const AchievementDetailModal: React.FC<AchievementDetailModalProps> = ({
         </button>
       </div>
     </div>
+    </ModalPortal>
   );
 };
